@@ -168,6 +168,21 @@ static void test_sbc_of_the_most_negative_value_sets_v_only_with_carry_in(void) 
     TEST_ASSERT_TRUE(cpu->psw & PDP11_PSW_V);
 }
 
+static void test_spl_sets_the_processor_priority_in_kernel_mode(void) {
+    // SPL 6 (0002346) in Kernel mode sets PSW<7:5> = 6. The V6 idle loop relies
+    // on this to mask interrupts while scanning the process table.
+    cpu->psw = 0; // kernel mode, priority 0
+    const uint16_t spl6[] = {0000236u}; // SPL 6 = 000230 | 6
+    run1(spl6, 1);
+    TEST_ASSERT_EQUAL_HEX16(6u, (cpu->psw >> 5) & 07u);
+    // In a non-Kernel mode SPL is a no-op (privileged).
+    pdp11_cpu_reset(cpu);
+    cpu->psw = 0140000u; // current mode = User (PSW<15:14> = 11), priority 0
+    cpu->r[PDP11_PC] = 001000;
+    run1(spl6, 1);
+    TEST_ASSERT_EQUAL_HEX16(0u, (cpu->psw >> 5) & 07u); // unchanged in User mode
+}
+
 static void test_neg_of_the_most_negative_value_sets_overflow(void) {
     // NEG 0100000 has no positive representation -> V set, result unchanged.
     cpu->r[PDP11_R0] = 0100000u;
@@ -936,6 +951,7 @@ int main(void) {
     RUN_TEST(test_cmp_sets_carry_as_borrow_when_source_is_below_destination);
     RUN_TEST(test_sub_subtracts_source_from_destination);
     RUN_TEST(test_sbc_of_the_most_negative_value_sets_v_only_with_carry_in);
+    RUN_TEST(test_spl_sets_the_processor_priority_in_kernel_mode);
     RUN_TEST(test_neg_of_the_most_negative_value_sets_overflow);
     RUN_TEST(test_movb_into_a_register_sign_extends_the_byte);
     RUN_TEST(test_movb_to_a_register_of_a_positive_byte_clears_the_high_byte);

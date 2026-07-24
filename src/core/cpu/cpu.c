@@ -1186,6 +1186,12 @@ static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
         op_jmp(cpu, word);
     } else if (word >= 0000200 && word <= 0000207) {
         op_rts(cpu, word);
+    } else if (word >= 0000230 && word <= 0000237) {
+        // SPL: set the CPU priority (PSW<7:5>) from the low 3 bits. Privileged —
+        // it only takes effect in Kernel mode; elsewhere it is a no-op (11/70).
+        if (((cpu->psw >> 14) & 03u) == 0) {
+            cpu->psw = (uint16_t)((cpu->psw & ~0340u) | ((word & 07u) << 5));
+        }
     } else if (word >= 0000240 && word <= 0000277) {
         op_ccops(cpu, word);
     } else if ((word & 0177000u) == 0004000) {

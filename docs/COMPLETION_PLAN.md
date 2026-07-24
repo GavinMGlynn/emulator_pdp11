@@ -264,6 +264,13 @@ real-output check) are exercised there.
     device-I/O / interrupt interaction once the kernel starts real work. Next: a
     spin-tolerant trace-aligner or state-transfer oracle to search past the first
     kernel disk I/O.
+  - **Bug #2 found + fixed — SPL not implemented.** Localised via RK-read-sequence
+    logging (first 117 reads identical) + a PC/SP/PSW trace binary-search of the
+    `main()`/`binit` gap: the first divergence was `SPL 6` (000230-000237), which
+    our decoder silently no-op'd, leaving the CPU priority wrong. Implemented SPL
+    (kernel-mode sets PSW<7:5>), unit-tested. A second cascaded divergence (a
+    Z-flag in the idle/`swtch` loop, likely interrupt/clock-timing) remains and is
+    the next target.
 - *Verify:* console TTY stream diffed vs SimH booting the same image **[A]/[C]**.
 
 ## P8 — Interactive SDL3 frontend

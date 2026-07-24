@@ -67,6 +67,19 @@ tied to device I/O or interrupt interaction once the kernel starts real work.
 Next: a spin-tolerant trace-aligner (or a state-transfer oracle) to search past
 the first kernel disk I/O.
 
+**P7c bug #2 — SPL not implemented (2026-07-25).** Localised the V6 boot
+divergence with a two-stage device+trace method: (1) logged every RK disk read in
+both emulators — the first **117 reads are identical**, then ours hangs where SimH
+continues, bracketing the divergence to the `main()`/`binit` gap (SimH read #117 →
+#118 spans instr 200089→943306 with *no* disk I/O, so instruction alignment holds
+there); (2) binary-searched that gap comparing kernel PC/SP/PSW traces anchored on
+the first `csv` (022272). The first divergence: at `SPL 6` (0000236) our PSW
+priority stayed 0 while SimH's went to 6 — **we never decoded SPL (000230-000237)
+at all**, silently no-op'ing a core 11/70 instruction. Implemented it (kernel-mode
+only sets PSW<7:5>); unit-tested. This advances the divergence (a second, cascaded
+Z-flag difference in the idle/swtch loop remains — likely interrupt/clock-timing
+related — the next target).
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|
