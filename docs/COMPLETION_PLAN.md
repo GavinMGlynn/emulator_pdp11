@@ -256,9 +256,14 @@ real-output check) are exercised there.
     (`tools/probes/gen_fuzz_probe.py`, golden `fuzz`) runs random register-mode
     instructions on our core and SimH and diffs the result/PSW. It caught **SBC
     setting V unconditionally** (SimH sets V only with a carry-in); fixed, with a
-    unit test and the seed-1 image checked in as a golden. The boot still hangs
-    after the fix, so the fuzzer needs extending to memory addressing modes to
-    find the remaining bug(s).
+    unit test and the seed-1 image checked in as a golden. Extended to memory
+    addressing modes (`memfuzz`) — also clean vs SimH. A kernel PC-trace diff,
+    anchored on the first `csv` after "unix", shows the first **64000 kernel
+    instructions are byte-identical** to SimH: the CPU is very accurate and the
+    divergence is deeper than SimH's 65536-entry history reaches, most likely in
+    device-I/O / interrupt interaction once the kernel starts real work. Next: a
+    spin-tolerant trace-aligner or state-transfer oracle to search past the first
+    kernel disk I/O.
 - *Verify:* console TTY stream diffed vs SimH booting the same image **[A]/[C]**.
 
 ## P8 — Interactive SDL3 frontend

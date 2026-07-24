@@ -56,6 +56,17 @@ Status values: `open` · `confirmed` (matches oracle) · `fixed` · `divergence`
 
 | `fuzz` (P7c): differential CPU fuzzer — 120 random register-mode instructions (two-op/one-op/EIS) over edge + random operands, PSW+dst stored per case | seed 1 image byte-identical to SimH | SimH 11/70 identical | confirmed | `tools/probes/gen_fuzz_probe.py <seed>`; a sweep of seeds vs SimH caught a real bug: **SBC set V unconditionally when dst==0100000**, but SimH sets V only with a carry-in (`V = C && result==077777`). Fixed in cpu.c; seed 1 checked in as a permanent golden. (Also flushed out a fuzzer self-collision — result table overlapping code past ~48 tests — now placed at 020000.) The register-mode fuzzer is clean across seeds 1-60; the V6 boot still hangs, so the remaining bug(s) are in a memory addressing mode the fuzzer doesn't yet cover. |
 
+| `memfuzz` (P7c): differential fuzzer — memory addressing modes ((R3), (R3)+, -(R3), X(R3)) for two-op/one-op, capturing the touched window + pointer reg + PSW | seed 1 image byte-identical to SimH | SimH 11/70 identical | confirmed | Clean across seeds 1-15: our effective-address, autoincrement/decrement side-effect, and read/write paths match SimH. Seed 1 checked in as a golden. Combined with the register `fuzz`, the CPU is exercised broadly; the V6 boot bug is not a plain instruction/addressing error. |
+
+**P7c trace comparison (2026-07-25):** anchored our and SimH's kernel PC traces on
+the first `csv` (022272) after "unix" and diffed forward — the first **64000
+kernel instructions are byte-identical** (via SimH `break 22272; step; show cpu
+history`). So the CPU is very accurate; the boot divergence is deeper than
+SimH's 65536-entry history reaches, and (since the fuzzers are clean) most likely
+tied to device I/O or interrupt interaction once the kernel starts real work.
+Next: a spin-tolerant trace-aligner (or a state-transfer oracle) to search past
+the first kernel disk I/O.
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|
