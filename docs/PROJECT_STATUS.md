@@ -53,7 +53,7 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | DL11 console SLU | **working** (P6b) | `dl11` register probe byte-identical to SimH; input/output + interrupt unit tests |
 | RK11/RK05 disk (DMA) | **working** (P6c) | `rk11` register probe byte-identical to SimH; DMA read/write + interrupt unit tests |
 | RP04 disk via RH70 Massbus (DMA) | **working** (P6d) | `rp11` register probe byte-identical to SimH; DMA read/write + interrupt unit tests |
-| TM11/TU tape | not started (P6e) | — |
+| TM11/TU10 magtape (.tap) | **working** (P6e) | `tm11` register probe byte-identical to SimH; record read/write + file-mark + interrupt unit tests |
 | Content boot (Unix V6/V7) | not started | — |
 | Interactive SDL frontend | not started | — |
 | Verified fast mode | not started | — |

@@ -52,6 +52,8 @@ Status values: `open` · `confirmed` (matches oracle) · `fixed` · `divergence`
 
 | `rp11` (P6d): RH70/RP04 registers — RPCS1 initial, write/read-back RPWC, RPBA, RPDA, RPDC | R0=04200 (CS1 DONE+DVA), R1=012345, R2=04000, R3=012045 (RPDA & 037477), R4=01234 (RPDC & 01777) | SimH 11/70 identical | confirmed | Register access goes through SimH's mba_mapofs (I/O offset → RH-internal or drive register); RH70 BAE/CS3 bolted on. Oracle caught the CS1 drive-available bit (04000) we initially omitted, and the RPDA/RPDC MBZ masks (0140300 / 0176000). DMA read/write and the BR5/vector-0254 completion interrupt are unit-tested. |
 
+| `tm11` (P6e): TM11 tape registers — MTS initial, MTC initial, write/read-back MTBRC, MTCMA, MTD | R0=01 (MTS unit-ready), R1=0200 (MTC DONE), R2=012345 (MTBRC), R3=04000 (MTCMA), R4=0123 (MTD) | SimH 11/70 identical | confirmed | TM enabled by default on the SimH pdp11. MTS reads STA_TUR (unit ready) with no tape attached. Port of pdp11_tm.c; record read/write (SimH .tap format), the file-mark→EOF status, and the BR5/vector-0224 completion interrupt are unit-tested. |
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|

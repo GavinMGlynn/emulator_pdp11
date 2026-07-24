@@ -6,6 +6,7 @@
 #include "console/console.h"
 #include "cpu/cpu.h"
 #include "devices/rk11.h"
+#include "devices/tm11.h"
 
 static pdp11_cpu *cpu;
 
@@ -827,6 +828,79 @@ static void test_rp04_completion_interrupts_through_254_when_enabled(void) {
     TEST_ASSERT_EQUAL_HEX16(0003000u, cpu->r[PDP11_PC]); // vectored to handler
 }
 
+// A small SimH .tap image: one 4-byte record [11 22 33 44] then a file mark.
+static uint8_t tm_tape[64];
+static void tm_build_tape(void) {
+    for (unsigned i = 0; i < sizeof tm_tape; ++i) {
+        tm_tape[i] = 0;
+    }
+    tm_tape[0] = 4;                                  // record length
+    tm_tape[4] = 0x11; tm_tape[5] = 0x22;
+    tm_tape[6] = 0x33; tm_tape[7] = 0x44;            // data
+    tm_tape[8] = 4;                                  // trailing length
+    // bytes 12-15 stay zero: a file mark
+}
+
+static void test_tm11_read_record_transfers_to_memory(void) {
+    tm_build_tape();
+    pdp11_tm_attach(cpu, tm_tape, sizeof tm_tape, false);
+    pdp11_tm_write(cpu, TM_MTCMA, 0010000u);
+    pdp11_tm_write(cpu, TM_MTBRC, (uint16_t)(0200000u - 4u));
+    pdp11_tm_write(cpu, TM_MTC, (01u << 1) | 1u); // READ, GO
+    cpu->time_ns = cpu->tm.done_ns;
+    pdp11_tm_poll(cpu);
+    TEST_ASSERT_TRUE(cpu->tm.cmd & 0000200u); // DONE
+    TEST_ASSERT_EQUAL_HEX16(0x2211u, pdp11_mem_read_word(cpu->mem, 0010000u));
+    TEST_ASSERT_EQUAL_HEX16(0x4433u, pdp11_mem_read_word(cpu->mem, 0010002u));
+    TEST_ASSERT_EQUAL_HEX16(0u, cpu->tm.bc); // count exhausted
+}
+
+static void test_tm11_write_record_stores_to_tape(void) {
+    for (unsigned i = 0; i < sizeof tm_tape; ++i) {
+        tm_tape[i] = 0;
+    }
+    pdp11_tm_attach(cpu, tm_tape, sizeof tm_tape, false);
+    pdp11_mem_write_word(cpu->mem, 0010000u, 0x2211u);
+    pdp11_mem_write_word(cpu->mem, 0010002u, 0x4433u);
+    pdp11_tm_write(cpu, TM_MTCMA, 0010000u);
+    pdp11_tm_write(cpu, TM_MTBRC, (uint16_t)(0200000u - 4u));
+    pdp11_tm_write(cpu, TM_MTC, (02u << 1) | 1u); // WRITE, GO
+    cpu->time_ns = cpu->tm.done_ns;
+    pdp11_tm_poll(cpu);
+    TEST_ASSERT_EQUAL_HEX8(4u, tm_tape[0]);    // record-length header
+    TEST_ASSERT_EQUAL_HEX8(0x11u, tm_tape[4]);
+    TEST_ASSERT_EQUAL_HEX8(0x44u, tm_tape[7]);
+    TEST_ASSERT_EQUAL_HEX8(4u, tm_tape[8]);    // record-length trailer
+}
+
+static void test_tm11_reading_a_file_mark_sets_eof(void) {
+    tm_build_tape();
+    pdp11_tm_attach(cpu, tm_tape, sizeof tm_tape, false);
+    cpu->tm.pos = 12; // positioned at the file mark
+    pdp11_tm_write(cpu, TM_MTBRC, (uint16_t)(0200000u - 4u));
+    pdp11_tm_write(cpu, TM_MTC, (01u << 1) | 1u); // READ, GO
+    cpu->time_ns = cpu->tm.done_ns;
+    pdp11_tm_poll(cpu);
+    TEST_ASSERT_TRUE(cpu->tm.sta & 0040000u); // STA_EOF
+}
+
+static void test_tm11_completion_interrupts_through_224(void) {
+    pdp11_mem_write_word(cpu->mem, 0000224u, 0003000u); // TM vector -> handler
+    pdp11_mem_write_word(cpu->mem, 0000226u, 0000340u);
+    cpu->r[PDP11_SP] = 0004000u;
+    tm_build_tape();
+    pdp11_tm_attach(cpu, tm_tape, sizeof tm_tape, false);
+    pdp11_tm_write(cpu, TM_MTCMA, 0010000u);
+    pdp11_tm_write(cpu, TM_MTBRC, (uint16_t)(0200000u - 4u));
+    pdp11_tm_write(cpu, TM_MTC, (01u << 1) | 1u | 0000100u); // READ, GO, IE
+    cpu->time_ns = cpu->tm.done_ns;
+    pdp11_tm_poll(cpu);
+    const uint16_t prog[] = {0010000u};
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0003000u, cpu->r[PDP11_PC]); // vectored to handler
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -894,5 +968,9 @@ int main(void) {
     RUN_TEST(test_rp04_read_transfers_a_sector_from_disk_to_memory);
     RUN_TEST(test_rp04_write_transfers_memory_to_disk);
     RUN_TEST(test_rp04_completion_interrupts_through_254_when_enabled);
+    RUN_TEST(test_tm11_read_record_transfers_to_memory);
+    RUN_TEST(test_tm11_write_record_stores_to_tape);
+    RUN_TEST(test_tm11_reading_a_file_mark_sets_eof);
+    RUN_TEST(test_tm11_completion_interrupts_through_224);
     return UNITY_END();
 }

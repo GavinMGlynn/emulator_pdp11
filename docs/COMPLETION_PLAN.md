@@ -181,8 +181,24 @@ recovery) and stack-limit yellow/red.
       ready + attention and interrupts. **[A]** `rp11` register probe
       byte-identical to SimH (CS1 with the drive-available bit, WC/BA/DA/DC with
       their MBZ masks); the DMA read/write and completion interrupt via unit tests.
-- [ ] **P6e** TM11/TU tape for install media.
+- [x] **P6e** TM11/TU10 magtape (`src/core/devices/tm11`): the six registers at
+      0172520-0172532, interrupting at BR5 through vector 0224. The tape image is
+      the SimH ".tap" format (4-byte little-endian record lengths bracketing the
+      data, a zero length being a file mark); read/write/space-forward/
+      space-reverse/write-EOF/rewind/unload decode from MTC<3:1>+GO. A read/write
+      moves a whole record between memory (18-bit MTCMA + MTC<5:4>) and the tape,
+      counting down MTBRC bytes. **[A]** `tm11` register probe byte-identical to
+      SimH (MTS/MTC/MTBRC/MTCMA/MTD); record read/write, the file-mark→EOF status,
+      and the vector-0224 completion interrupt via unit tests.
 - *Verify:* device-register probes **[A]**; XXDP/MAINDEC diagnostics pass **[C]**.
+  - *Documented tail (TM11):* single TU10 on drive 0; 7-track / density / parity /
+    extended-status details are minimal.
+
+**P6 is complete** — the device set for a Unix boot (KW11-L clock, DL11 console,
+RK11 disk, RP04/RH70 disk, TM11 tape) plus the device-interrupt controller. Next
+is P7, the content boot; the standing P6 infra tails (Unibus Map for >256 KB DMA;
+attached-disk SimH memory-diff harness; XXDP/MAINDEC diagnostics as the [C]
+real-output check) are exercised there.
   - *Documented tails (RP/RH70):* single RP04 on drive 0; the Massbus error /
     attention-summary / offset / ECC / diagnostic registers are minimal (read 0);
     the RH11 `mba_mapofs` is used with RH70 BAE/CS3 bolted on; DMA uses the 22-bit
