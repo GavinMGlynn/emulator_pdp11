@@ -175,13 +175,29 @@ after reading the login name the kernel writes **nothing** to the console (no
 echo, no shell) and sits in a repeated disk-**write** loop over blocks 2/7/8 (in
 50M instr: block 7 ×133, 8 ×70, 2 ×66 — SimH's whole boot-to-login is 230 ops).
 The write loop appears even without sending `root`, so it is a background kernel
-loop, not login-triggered; it likely starves login of CPU. Hypotheses: the V6
-`update` daemon's `sleep(30)` not blocking (a clock/sleep issue), or init
-respawning a getty that exits. *Next:* trace the write loop's caller PC and what
-keeps those buffers dirty / the sleep from blocking, vs SimH. (SimH console
-capture in batch mode is unreliable here — `expect`/`send` don't echo the guest
-stream to stdout or `set console log`; will need `send after=<instr>` timing or a
-targeted trap trace instead.)
+loop, not login-triggered; it likely starves login of CPU.
+
+**Localised the loop (2026-07-25 cont.).** Traced the post-login window (gated on
+"login: ") to a tight kernel loop at virtual 034312-034374. The kernel PARs show
+KISA1=041600 (i.e. virtual page 1 is *not* identity-mapped), so virtual 034316 is
+physical 056116 — disassembling the correct physical bytes gives:
+`MOV #62,R4; ADD #26,R2; CMP #7322,R2; BHI .+; MOV #5206,R2; CMPB #3,(R2);
+BNE …; BITB #1,1(R2); BEQ …; MOVB 2(R2),R0; CMP R3,R0; BLE …; MOV R2,41576;
+MOVB 2(R2),R3; SOB R4,…; TST 41576`. This is V6 **`swtch()`**: it scans the
+50-entry proc table (base 05206, 22-byte stride, wrap at 07322) for the
+runnable, in-core process (`p_stat==3` = SRUN, `p_flag` bit 0 = SLOAD) of best
+priority, recording the winner at 041576. So the kernel is **context-switching
+continually** and a selected process repeatedly writes inode blocks 2/7/8. This
+is deep V6 scheduler/daemon behaviour (a process stuck in a file-I/O loop, or a
+buffer that never clears B_DELWRI so it is re-flushed — possibly an RK
+write-completion nuance, or the `update` sleep). Not a core-subsystem gap: every
+CPU/MMU/device probe is byte-identical to SimH and the boot reaches `login:`.
+*Next (own iteration):* identify the selected process (dump the proc entry at
+041576: p_pid/p_addr) and whether its writes are retries (same block back-to-back
+= completion bug) vs periodic (dirty buffer never cleared); compare with SimH via
+a targeted RK-write trace. (SimH console capture in batch mode is unreliable —
+`expect`/`send` don't echo to stdout or `set console log`; use `SET RK DEBUG=OPS`
+and `send after=<instr>`.)
 
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |

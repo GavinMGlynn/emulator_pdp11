@@ -316,10 +316,14 @@ real-output check) are exercised there.
       after reading the login name the kernel emits *no* console output (no echo,
       no shell) and sits in a repeated disk-**write** loop over blocks 2/7/8 (in
       50M instr: block 7 written 133×, 8 70×, 2 66× — far above SimH's periodic
-      sync). Likely a daemon/`update` sleep or an init/getty respawn spinning and
-      starving login of CPU. *Next:* characterise the write-loop's caller (PC +
-      what keeps the buffers dirty / the sleep from blocking) vs SimH. *Verify:*
-      TTY stream vs SimH **[C]**.
+      sync). Localised (via kernel PARs → real physical → disassembly) to V6
+      **`swtch()`** scanning the 50-entry proc table for a runnable in-core
+      process: the kernel context-switches continually and a selected process
+      keeps writing inode blocks. Deep V6 scheduler/daemon behaviour, not a
+      core-subsystem gap (all probes match SimH; boot reaches `login:`). *Next:*
+      identify the writing process (proc entry at 041576) and whether its writes
+      are retries (completion bug) or a never-cleared dirty buffer, vs SimH.
+      *Verify:* TTY stream vs SimH **[C]**.
 - *Verify:* console TTY stream diffed vs SimH booting the same image **[A]/[C]**.
 
 ## P8 — Interactive SDL3 frontend
