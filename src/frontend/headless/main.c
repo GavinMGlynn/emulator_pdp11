@@ -16,7 +16,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "console/console.h"
 #include "cpu/cpu.h"
+#include "devices/rk11.h"
 
 #define MAX_DUMP_REGIONS 32
 
@@ -29,9 +31,137 @@ static uint32_t parse_octal(const char *s) {
     return (uint32_t)strtoul(s, NULL, 8);
 }
 
+// ---- boot mode (P7) --------------------------------------------------------
+// Attach an RK05 .dsk image, deposit the standard RK boot ROM (which reads block
+// 0 to memory 0 and jumps there — identical to SimH's rk_boot), capture the DL11
+// console to stdout, and inject scripted keyboard input. This drives a real Unix
+// boot as the integration thermometer; the console stream diffs against SimH.
+
+// SimH's RK boot ROM (pdp11_rk.c boot_rom), loaded at 02000, entry 02002.
+#define BOOT_START 02000u
+static const uint16_t rk_boot_rom[] = {
+    0042113,                    // "KD"
+    0012706, BOOT_START,        // MOV #boot_start, SP
+    0012700, 0000000,           // MOV #unit, R0
+    0010003,                    // MOV R0, R3
+    0000303,                    // SWAB R3
+    0006303, 0006303, 0006303, 0006303, 0006303, // ASL R3 x5
+    0012701, 0177412,           // MOV #RKDA, R1
+    0010311,                    // MOV R3, (R1)   ; load disk address (drive)
+    0005041,                    // CLR -(R1)      ; clear bus address
+    0012741, 0177000,           // MOV #-256.*2, -(R1) ; word count
+    0012741, 0000005,           // MOV #READ+GO, -(R1) ; command
+    0005002,                    // CLR R2
+    0005003,                    // CLR R3
+    0012704, BOOT_START + 020u, // MOV #START+20, R4
+    0005005,                    // CLR R5
+    0105711,                    // TSTB (R1)      ; wait for done
+    0100376,                    // BPL .-2
+    0105011,                    // CLRB (R1)
+    0005007,                    // CLR PC         ; jump to the loaded block 0
+};
+
+static void console_sink(void *ctx, uint8_t ch) {
+    (void)ctx;
+    putchar(ch);
+    fflush(stdout);
+}
+
+// Convert C-style escapes (\r \n \t \\) in an input script to raw bytes.
+static size_t unescape(const char *s, uint8_t *out, size_t cap) {
+    size_t n = 0;
+    for (size_t i = 0; s[i] && n < cap; ++i) {
+        if (s[i] == '\\' && s[i + 1]) {
+            char c = s[++i];
+            out[n++] = (uint8_t)(c == 'r' ? '\r' : c == 'n' ? '\n'
+                                 : c == 't' ? '\t' : c);
+        } else {
+            out[n++] = (uint8_t)s[i];
+        }
+    }
+    return n;
+}
+
+static int run_boot(const char *disk_path, uint64_t max_instr,
+                    const char *in_script) {
+    FILE *df = fopen(disk_path, "rb");
+    if (df == NULL) {
+        fprintf(stderr, "cannot open disk image '%s'\n", disk_path);
+        return 2;
+    }
+    fseek(df, 0, SEEK_END);
+    long bytes = ftell(df);
+    fseek(df, 0, SEEK_SET);
+    uint32_t words = (uint32_t)(bytes / 2);
+    uint16_t *disk = calloc(RK_WORDS > words ? RK_WORDS : words, sizeof(uint16_t));
+    if (disk == NULL) {
+        fclose(df);
+        fprintf(stderr, "out of memory for disk\n");
+        return 2;
+    }
+    for (uint32_t i = 0; i < words; ++i) {
+        int lo = fgetc(df), hi = fgetc(df);
+        if (hi == EOF) {
+            break;
+        }
+        disk[i] = (uint16_t)(lo | (hi << 8));
+    }
+    fclose(df);
+
+    pdp11_cpu *cpu = pdp11_cpu_create();
+    if (cpu == NULL) {
+        free(disk);
+        return 2;
+    }
+    pdp11_console_set_sink(cpu, console_sink, NULL);
+    pdp11_rk_attach(cpu, disk, RK_WORDS > words ? RK_WORDS : words);
+
+    // Deposit the boot ROM and start at its entry (02002).
+    for (size_t i = 0; i < sizeof rk_boot_rom / sizeof rk_boot_rom[0]; ++i) {
+        pdp11_mem_write_word(cpu->mem, BOOT_START + (uint32_t)(i * 2),
+                             rk_boot_rom[i]);
+    }
+    cpu->r[PDP11_PC] = (uint16_t)(BOOT_START + 2u);
+
+    uint8_t input[512];
+    size_t in_len = in_script ? unescape(in_script, input, sizeof input) : 0;
+    size_t in_pos = 0;
+
+    for (uint64_t i = 0; i < max_instr && !cpu->halted; ++i) {
+        pdp11_cpu_step(cpu);
+        // Feed the next scripted key once the receiver buffer is empty.
+        if (in_pos < in_len && !(cpu->tti_csr & DL11_DONE)) {
+            pdp11_console_input(cpu, input[in_pos++]);
+        }
+    }
+    fprintf(stderr, "\n[boot: halted=%d instr=%llu pc=%06o]\n",
+            cpu->halted ? 1 : 0, (unsigned long long)cpu->instr_count,
+            cpu->r[PDP11_PC]);
+    pdp11_cpu_destroy(cpu);
+    free(disk);
+    return 0;
+}
+
 int main(int argc, char **argv) {
+    // Boot mode: pdp11_headless --boot-rk <disk> [--max N] [--in <script>]
+    if (argc >= 3 && strcmp(argv[1], "--boot-rk") == 0) {
+        const char *disk = argv[2];
+        uint64_t max_instr = 50000000ull;
+        const char *in_script = NULL;
+        for (int i = 3; i + 1 < argc; i += 2) {
+            if (strcmp(argv[i], "--max") == 0) {
+                max_instr = strtoull(argv[i + 1], NULL, 10);
+            } else if (strcmp(argv[i], "--in") == 0) {
+                in_script = argv[i + 1];
+            }
+        }
+        return run_boot(disk, max_instr, in_script);
+    }
+
     if (argc != 2) {
         fprintf(stderr, "usage: %s <image-file>\n", argv[0]);
+        fprintf(stderr, "   or: %s --boot-rk <disk.dsk> [--max N] [--in script]\n",
+                argv[0]);
         return 2;
     }
 

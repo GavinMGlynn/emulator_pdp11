@@ -230,10 +230,20 @@ real-output check) are exercised there.
       `root` → `# ` and commands run. Repeatable script:
       `tools/simh-oracle/boot_v6.ini`; this console stream is the P7 target.
       (`bitsavers .../rk05/v6unix.dsk` is a non-bootable *user* disk — not this.)
-- [ ] **P7b** Headless frontend boot harness: attach an RK image, `boot rk`
-      (load block 0 → memory, PC=0, run), and capture the DL11 console to stdout.
-- [ ] **P7c** Drive our core to console parity with SimH — the real integration
-      thermometer for the P6 devices (RK DMA, MMU, KW11-L, DL11). Diff is on
+- [x] **P7b** Headless frontend boot harness (`--boot-rk <disk> [--max N]
+      [--in script]`): loads a `.dsk` into the RK, deposits SimH's RK boot ROM
+      (reads block 0 → memory 0, jumps there), captures the DL11 console to
+      stdout, and injects scripted keyboard input once the receiver drains.
+      **Result:** our core boots the V6 image to the `@` prompt (RK DMA + CPU +
+      DL11 all working under real boot code, PC matching SimH's input-wait loop),
+      echoes `unix`, and runs into the kernel.
+- [~] **P7c** Drive our core to console parity with SimH. **Current stall:** after
+      `unix`, the kernel loads and runs but hangs in a linked-list traversal at
+      kernel virtual PC 064512-064530 (`BIT #1000,(R4) / BNE / MOV 6(R4),R4 /
+      CMP #017116,R4 / BNE`) — R4 never reaches the sentinel, i.e. a corrupt
+      kernel structure. Points to a device-DMA or CPU-edge bug that only real
+      driver code exercises; the next step is the attached-disk SimH memory-diff
+      (the standing P6 tail) to localise the first divergent word. Diff is on
       console *content* (SimH's clock is wall-clock-timed, not cycle-accurate).
 - *Verify:* console TTY stream diffed vs SimH booting the same image **[A]/[C]**.
 

@@ -54,7 +54,7 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | RK11/RK05 disk (DMA) | **working** (P6c) | `rk11` register probe byte-identical to SimH; DMA read/write + interrupt unit tests |
 | RP04 disk via RH70 Massbus (DMA) | **working** (P6d) | `rp11` register probe byte-identical to SimH; DMA read/write + interrupt unit tests |
 | TM11/TU10 magtape (.tap) | **working** (P6e) | `tm11` register probe byte-identical to SimH; record read/write + file-mark + interrupt unit tests |
-| Content boot (Unix V6/V7) | **reference established** (P7a) | SimH boots `unix0_v6_rk.dsk` to a root shell (`tools/simh-oracle/boot_v6.ini`); frontend boot harness + core parity next |
+| Content boot (Unix V6/V7) | **boots to `@`, kernel loads** (P7a/b; P7c debugging) | headless `--boot-rk` reaches the `@` prompt and echoes `unix` (RK DMA+CPU+DL11 under real code); kernel then hangs traversing a corrupt list at PC 064512 — chase via SimH memory-diff |
 | Interactive SDL frontend | not started | — |
 | Verified fast mode | not started | — |
 | Other models (11/20…11/94) | not started | — |
