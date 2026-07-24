@@ -58,6 +58,10 @@ class Asm:
     def mov_imm(self, reg, value):
         self._emit(2, lambda L, a: [0o012700 | (reg & 7), value & 0o177777])
 
+    def mov_label(self, reg, target):
+        # MOV #addr(target), Rreg
+        self._emit(2, lambda L, a: [0o012700 | (reg & 7), L[target] & 0o177777])
+
     def two(self, op, src, dst):
         sspec, sx = ea(src)
         dspec, dx = ea(dst)

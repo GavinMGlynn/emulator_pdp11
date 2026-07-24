@@ -378,6 +378,36 @@ static void test_a_pirq_at_or_below_the_cpu_priority_is_masked(void) {
     TEST_ASSERT_EQUAL_HEX16(0001002u, cpu->r[PDP11_PC]); // no vectoring
 }
 
+static void test_wait_idles_until_an_interrupt_is_granted(void) {
+    cpu->psw = 0; // priority 0
+    pdp11_mem_write_word(cpu->mem, 0240u, 0001600u);
+    pdp11_mem_write_word(cpu->mem, 0242u, 0000340u);
+    const uint16_t prog[] = {0000001u}; // WAIT
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu); // WAIT executes
+    TEST_ASSERT_TRUE(cpu->waiting);
+    TEST_ASSERT_EQUAL_HEX16(0001002u, cpu->r[PDP11_PC]);
+    pdp11_cpu_step(cpu); // no interrupt: idles, PC does not advance
+    TEST_ASSERT_TRUE(cpu->waiting);
+    TEST_ASSERT_EQUAL_HEX16(0001002u, cpu->r[PDP11_PC]);
+    cpu->r[PDP11_SP] = 0002000u;
+    cpu->pirq = 0100000u; // PIR7 arrives
+    pdp11_cpu_step(cpu); // interrupt granted; wait ends
+    TEST_ASSERT_FALSE(cpu->waiting);
+    TEST_ASSERT_EQUAL_HEX16(0001600u, cpu->r[PDP11_PC]);
+}
+
+static void test_mark_restores_pc_from_r5_and_cleans_the_stack(void) {
+    cpu->r[5] = 0001234u;
+    pdp11_mem_write_word(cpu->mem, 0001002u, 0004321u); // mem[i], i = PC after MARK
+    const uint16_t prog[] = {0006400u}; // MARK 0
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0001234u, cpu->r[PDP11_PC]); // PC <- old R5
+    TEST_ASSERT_EQUAL_HEX16(0004321u, cpu->r[5]);        // R5 <- mem[i]
+    TEST_ASSERT_EQUAL_HEX16(0001004u, cpu->r[PDP11_SP]); // SP <- i + 2
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -414,5 +444,7 @@ int main(void) {
     RUN_TEST(test_an_11_70_illegal_instruction_traps_through_vector_10);
     RUN_TEST(test_a_pirq_above_the_cpu_priority_is_granted_through_240);
     RUN_TEST(test_a_pirq_at_or_below_the_cpu_priority_is_masked);
+    RUN_TEST(test_wait_idles_until_an_interrupt_is_granted);
+    RUN_TEST(test_mark_restores_pc_from_r5_and_cleans_the_stack);
     return UNITY_END();
 }

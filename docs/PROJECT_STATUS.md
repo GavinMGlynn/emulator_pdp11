@@ -30,8 +30,9 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | EIS (MUL/DIV/ASH/ASHC/XOR) | **working** (P2c) | `eis` probe (14 cases, results+flags) byte-identical to SimH |
 | Memory-mapped PSW (0177776) | **working** | read/written the hardware way; `eis` probe + unit test |
 | Odd-address (bus) + reserved-instruction traps | **working** (P2b) | `faults` probe byte-identical to SimH; abort via setjmp/longjmp |
-| Interrupts (priority-gated) / PIRQ / RESET | **working** (P2d) | `intr` probe byte-identical to SimH; 2 unit tests |
-| WAIT / MARK | not started (P2d tail) | — |
+| Interrupts (priority-gated) / PIRQ / RESET / WAIT | **working** (P2d) | `intr` probe byte-identical to SimH; unit tests |
+| MARK | **working** (P2d) | `mark` probe byte-identical to SimH |
+| **CPU (integer) — P1+P2 COMPLETE** | **done** | 10 SimH goldens + 36 unit tests |
 | MMU (KT11, 22-bit, I/D) | not started | — |
 | Cache + Unibus/Massbus timing | not started | — (the cycle-accuracy core) |
 | FP11-C floating point | not started | — |

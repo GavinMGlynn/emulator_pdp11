@@ -47,6 +47,7 @@ void pdp11_cpu_reset(pdp11_cpu *cpu) {
     }
     cpu->psw = 0;
     cpu->halted = false;
+    cpu->waiting = false;
     cpu->trace_pending = false;
     cpu->pirq = 0;
     cpu->instr_count = 0;
@@ -443,6 +444,16 @@ static void single_op(pdp11_cpu *cpu, uint16_t word, uint16_t base,
 
 // --- Decode & step ----------------------------------------------------------
 // Returns true if this word was a recognised single-operand instruction.
+// MARK nn (0064nn): subroutine-return stack cleanup.
+//   i = PC + 2*nn;  PC = R5;  R5 = mem[i];  SP = i + 2
+static void op_mark(pdp11_cpu *cpu, uint16_t word) {
+    uint16_t nn = (uint16_t)(word & 077u);
+    uint16_t i = (uint16_t)(cpu->r[PDP11_PC] + 2u * nn);
+    cpu->r[PDP11_PC] = cpu->r[5];
+    cpu->r[5] = cpu_read_word(cpu, i);
+    cpu->r[PDP11_SP] = (uint16_t)(i + 2u);
+}
+
 static bool try_single_op(pdp11_cpu *cpu, uint16_t word) {
     uint16_t code = (uint16_t)((word >> 6) & 01777u); // bits 15-6
     bool bytemode = (code & 01000u) != 0;
@@ -450,6 +461,10 @@ static bool try_single_op(pdp11_cpu *cpu, uint16_t word) {
 
     if (base == 0003 && !bytemode) { // SWAB (word only)
         single_op(cpu, word, 0003, false);
+        return true;
+    }
+    if (base == 0064 && !bytemode) { // MARK
+        op_mark(cpu, word);
         return true;
     }
     if (base >= 0050 && base <= 0063) { // CLR..ASL (word + byte)
@@ -768,6 +783,8 @@ static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
         do_trap(cpu, VEC_IOT);  // IOT
     } else if (word == 0) {
         cpu->halted = true;     // HALT
+    } else if (word == 0000001) {
+        cpu->waiting = true;    // WAIT for an interrupt
     } else if (word == 0000005) {
         cpu->pirq = 0;          // RESET: bus INIT clears device state (+ PIRQ)
     } else if ((word & 0177700u) == 0106400u  // MTPS  (LSI-only)
@@ -797,8 +814,13 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
     // the current CPU priority (PSW bits 7-5). Traps outrank interrupts, so this
     // follows the trace check. Device interrupts join this path at P6.
     if (highest_pir_level(cpu->pirq) > (int)((cpu->psw >> 5) & 07u)) {
+        cpu->waiting = false; // an interrupt ends the wait state
         do_trap(cpu, VEC_PIRQ);
         cpu->instr_count++;
+        return;
+    }
+    // WAIT idles the processor until an interrupt arrives (checked above).
+    if (cpu->waiting) {
         return;
     }
     // Arm a trace trap to fire after this instruction if T is set going in.

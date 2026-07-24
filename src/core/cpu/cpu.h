@@ -30,6 +30,7 @@ typedef struct pdp11_cpu {
     uint16_t r[8]; // R0-R7 (kernel set; alternate set + modes land later)
     uint16_t psw;  // processor status word
     bool halted;   // set by HALT until the next reset
+    bool waiting;  // set by WAIT; cleared when an interrupt is granted
     bool trace_pending; // a T-bit trace trap is due before the next instruction
     uint16_t pirq; // program interrupt request register (0177772)
 

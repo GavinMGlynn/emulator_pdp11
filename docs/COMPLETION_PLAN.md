@@ -42,10 +42,14 @@ Verification legend: **[A]** = architectural diff vs SimH oracle;
 - [x] **P2c** EIS: MUL, DIV, ASH, ASHC, XOR. **[A]** `eis` probe (14 cases,
       results + flags via the memory-mapped PSW at 0177776) byte-identical to
       SimH. (MFPS/MTPS confirmed illegal on the 11/70 — deferred to per-model P10.)
-- [~] **P2d** Priority-gated interrupts + PIRQ (program interrupt request at
-      0177772, vector 0240) + RESET done. **[A]** `intr` probe byte-identical to
-      SimH. WAIT and MARK remain (P2d tail) to close P2. Device BR4-7 interrupts
-      join this same path at P6.
+- [x] **P2d** Priority-gated interrupts + PIRQ (0177772, vector 0240) + RESET +
+      WAIT + MARK. **[A]** `intr` and `mark` probes byte-identical to SimH; WAIT
+      unit-tested (async device wake tested with the KW11-L clock at P6). Device
+      BR4-7 interrupts join this same path at P6.
+
+**P2 COMPLETE.** With P1, the 11/70 integer CPU is done: full instruction set,
+addressing modes, EIS, traps, interrupts, the memory-mapped PSW/PIRQ — 10 SimH
+goldens + 36 unit tests, green on debug and release.
 - *Verify:* trap/interrupt probes **[A]**; EIS probes **[A]**. Timing **[T]** at P4.
 
 ## P3 — Memory management (KT11, 22-bit)
