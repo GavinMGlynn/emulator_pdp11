@@ -514,6 +514,29 @@ static void test_branch_timing_is_600ns_taken_and_300ns_not_taken(void) {
     TEST_ASSERT_EQUAL_UINT64(300, cpu->time_ns);
 }
 
+static void test_ldfps_and_cfcc_move_the_fp_status_and_condition_codes(void) {
+    // LDFPS #240 ; CFCC   (FPS = N | Z... 240 = D-bit + ... use CC bits)
+    cpu->psw = 0;
+    const uint16_t prog[] = {0170127u, 0000017u, 0170000u}; // LDFPS #17 ; CFCC
+    deposit(001000, prog, 3);
+    pdp11_cpu_step(cpu); // LDFPS #17 -> FPS low nibble = N Z V C
+    TEST_ASSERT_EQUAL_HEX16(0000017u, cpu->fps);
+    pdp11_cpu_step(cpu); // CFCC -> PSW condition codes = FPS condition codes
+    TEST_ASSERT_EQUAL_HEX16(0000017u, (uint16_t)(cpu->psw & 017u));
+}
+
+static void test_setd_and_setf_toggle_the_fps_double_bit(void) {
+    const uint16_t setd[] = {0170011u}; // SETD
+    deposit(001000, setd, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_TRUE(cpu->fps & 0000200u); // D bit set
+    cpu->r[PDP11_PC] = 001000;
+    const uint16_t setf[] = {0170001u}; // SETF
+    deposit(001000, setf, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_FALSE(cpu->fps & 0000200u); // D bit cleared
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -559,5 +582,7 @@ int main(void) {
     RUN_TEST(test_mfpi_reads_the_previous_modes_space_and_pushes_it);
     RUN_TEST(test_data_references_use_d_space_when_it_is_enabled);
     RUN_TEST(test_branch_timing_is_600ns_taken_and_300ns_not_taken);
+    RUN_TEST(test_ldfps_and_cfcc_move_the_fp_status_and_condition_codes);
+    RUN_TEST(test_setd_and_setf_toggle_the_fps_double_bit);
     return UNITY_END();
 }

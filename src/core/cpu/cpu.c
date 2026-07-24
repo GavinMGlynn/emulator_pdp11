@@ -66,6 +66,12 @@ void pdp11_cpu_reset(pdp11_cpu *cpu) {
     for (int i = 0; i < 4; ++i) {
         cpu->stackfile[i] = 0;
     }
+    for (int i = 0; i < 6; ++i) {
+        cpu->fac[i] = 0;
+    }
+    cpu->fps = 0;
+    cpu->fec = 0;
+    cpu->fea = 0;
     cpu->instr_count = 0;
     cpu->time_ns = 0;
     pdp11_cache_reset(&cpu->cache);
@@ -1125,6 +1131,61 @@ static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
     // net tightens as those land.
 }
 
+// --- FP11-C floating point (P5) ---------------------------------------------
+#define FPS_CC 0000017u // condition codes (N Z V C), same positions as the PSW
+#define FPS_D  0000200u // 0 = single, 1 = double
+#define FPS_L  0000100u // 0 = short integer, 1 = long
+#define FPS_RW 0147757u // writable FPS bits (SimH FPS_RW)
+
+// FP11 instruction decode (top nibble 017). P5a implements the control group
+// (IR<11:8> == 0): CFCC, SETF/SETI/SETD/SETL, LDFPS, STFPS, STST. The load/
+// store and arithmetic groups (IR<11:8> != 0) arrive in later P5 increments.
+static void op_fp11(pdp11_cpu *cpu, uint16_t word) {
+    int major = (word >> 8) & 017;
+    int subop = (word >> 6) & 03;
+
+    if (major != 0) {
+        return; // LDf/STf/arith — P5b (no-op for now)
+    }
+    switch (subop) {
+    case 0: // specials
+        switch (word) {
+        case 0170000: // CFCC: FP condition codes -> PSW condition codes
+            cpu->psw = (uint16_t)((cpu->psw & ~017u) | (cpu->fps & FPS_CC));
+            break;
+        case 0170001: cpu->fps = (uint16_t)(cpu->fps & ~FPS_D); break; // SETF
+        case 0170002: cpu->fps = (uint16_t)(cpu->fps & ~FPS_L); break; // SETI
+        case 0170011: cpu->fps |= FPS_D; break;                        // SETD
+        case 0170012: cpu->fps |= FPS_L; break;                        // SETL
+        default: break; // FEC_OP trap lands with the exception model (P5)
+        }
+        break;
+    case 1: { // LDFPS
+        operand s = decode_operand(cpu, (uint8_t)(word & 077u), false);
+        cpu->fps = (uint16_t)(read_operand(cpu, s, false) & FPS_RW);
+        break;
+    }
+    case 2: { // STFPS
+        cpu->fps &= FPS_RW;
+        operand d = decode_operand(cpu, (uint8_t)(word & 077u), false);
+        write_operand(cpu, d, false, cpu->fps);
+        break;
+    }
+    case 3: { // STST: store FEC then FEA
+        operand d = decode_operand(cpu, (uint8_t)(word & 077u), false);
+        if (d.is_reg) {
+            cpu->r[d.reg] = cpu->fec;
+        } else {
+            cpu_write_word(cpu, d.addr, cpu->fec);
+            cpu_write_word(cpu, (uint16_t)(d.addr + 2u), cpu->fea);
+        }
+        break;
+    }
+    default:
+        break;
+    }
+}
+
 void pdp11_cpu_step(pdp11_cpu *cpu) {
     if (cpu->halted) {
         return;
@@ -1190,8 +1251,10 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
     case 000: // single-op / branches / JMP / RTS / cc-ops / JSR / HALT
     case 007: // SOB (+ EIS/FIS in P2/P5)
     case 010: // branches / byte single-op / EMT / TRAP (P2)
-    case 017: // FP11 (P5)
         decode_misc(cpu, word);
+        break;
+    case 017: // FP11-C floating point
+        op_fp11(cpu, word);
         break;
     default:
         break;

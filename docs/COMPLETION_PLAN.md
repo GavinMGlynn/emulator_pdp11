@@ -102,13 +102,27 @@ recovery) and stack-limit yellow/red.
       (total time = cpu->time_ns + cache.misses*1020). Hardware random replacement
       is modeled by a deterministic round-robin victim (documented). **[T]**
       cache_suite (4 cases); architectural goldens unchanged (cache is timing-only).
-- [ ] **P4d** Reference `tick()` core (one tick per processor clock) for emergent
-      DMA/bus contention; Unibus map + RH70 Massbus.
+- [ ] **P4d → folded into P6** Reference `tick()` core for emergent DMA/bus
+      contention, the Unibus map, and RH70 Massbus. These are device-coupled: the
+      handbook times exclude NRP/BR serving (NOTE 2), so contention only exists
+      once a device does DMA. They are therefore built with the devices in P6,
+      where they can be exercised and verified — a dependency-driven re-sequence,
+      not skipped work. Instruction + cache timing (P4a-c) gives cycle-accurate
+      non-DMA timing now.
+
+**P4 (CPU cycle timing) COMPLETE** for the non-DMA case: instruction timing
+(SRC/DST/EF from the Handbook) + the KB11-C cache, every number cited in FINDINGS.
 - *Verify:* timing checked against KB11-C / Handbook tables **[T]**; every number
   cited in FINDINGS.md.
 
 ## P5 — FP11-C floating point
-- [ ] FP accumulators, FPS/FEC/FEA, single & double, rounding & exceptions.
+- [x] **P5a** FP state (6 accumulators, FPS, FEC/FEA) + control instructions:
+      CFCC, SETF/SETI/SETD/SETL, LDFPS, STFPS, STST. **[A]** `fp` probe
+      byte-identical to SimH (which has the FP11 on the 11/70).
+- [ ] **P5b** Load/store: LDF/LDD, STF/STD; the packed single/double memory
+      format and the FAC representation.
+- [ ] **P5c** Arithmetic: ADD/SUB/MUL/DIV/CMP/MOD, conversions (LDC*/STC*),
+      LDEXP/STEXP, rounding & the FP exception model (FEC/FEA, traps).
 - *Verify:* FP arithmetic probes **[A]**; FP timing **[T]**.
 
 ## P6 — Devices for the Unix boot

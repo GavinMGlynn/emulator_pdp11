@@ -21,7 +21,7 @@ add_test(NAME cache_suite COMMAND cache_suite)
 # build types because it is emulated architectural state, not wall-clock timing.
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
-    foreach(probe add3 alu flow trap trace eis faults intr mark jmpreg mmu mmuabort regset mfp idspace)
+    foreach(probe add3 alu flow trap trace eis faults intr mark jmpreg mmu mmuabort regset mfp idspace fp)
         add_test(NAME golden_${probe}
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tools/regress.py

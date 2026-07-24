@@ -42,7 +42,8 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | Instruction timing (KB11-C tables) | **in progress** (P4a) | timing_suite vs Handbook App. C tables |
 | 11/70 cache (hit/miss timing) | **working** (P4c) | cache_suite; KB11-C sec 2.2 |
 | Per-cycle tick() core + Unibus/Massbus | not started (P4d) | — |
-| FP11-C floating point | not started | — |
+| FP11-C control (CFCC/SET*/LDFPS/STFPS/STST) | **working** (P5a) | `fp` probe byte-identical to SimH; unit tests |
+| FP11-C load/store + arithmetic | not started (P5b/c) | — |
 | Devices (KW11-L, DL11, RK, RP, TM/TU) | not started | — |
 | Content boot (Unix V6/V7) | not started | — |
 | Interactive SDL frontend | not started | — |

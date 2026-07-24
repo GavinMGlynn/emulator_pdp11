@@ -32,6 +32,8 @@ Status values: `open` · `confirmed` (matches oracle) · `fixed` · `divergence`
 
 | `idspace` (P3b): kernel D-space enabled, D page 2 -> PA 0100000 (0122222); a `(R1)` data read of VA 040000 | R0=0122222 | SimH 11/70 identical | confirmed | Validates data refs use D-space while fetches use I-space. Oracle caught a *probe* bug first: an initial value 0222222 exceeds 16 bits, which SimH's deposit rejects (stayed 0) while our loader masked it — a false divergence until the probe used a 16-bit value. |
 
+| `fp` (P5a): FP control — LDFPS/STFPS move the FP status, SET* mode bits, CFCC copies FP CC to the PSW | mem[4000]=200 mem[4002]=17 PSW=17 | SimH 11/70 identical | confirmed | Validates the FP11 control group; the FP11 is standard on the 11/70. |
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|

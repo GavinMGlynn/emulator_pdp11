@@ -49,6 +49,13 @@ typedef struct pdp11_cpu {
     uint16_t regfile[6][2];
     uint16_t stackfile[4];
 
+    // FP11-C floating point (P5). Six 64-bit accumulators, the floating-point
+    // status word, and the exception code/address registers.
+    uint64_t fac[6];
+    uint16_t fps;
+    uint16_t fec;
+    uint16_t fea;
+
     // Mid-instruction fault handling. A bus/odd-address (later MMU) fault
     // longjmps to abort_env, set up at the top of each instruction, and the
     // step loop then traps through abort_vec.
