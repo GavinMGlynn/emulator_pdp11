@@ -108,6 +108,21 @@ class Asm:
     def ccop(self, word):
         self._emit(1, lambda L, a: [word & 0o177777])
 
+    # EIS: op reg, src   (reg = bits 8-6, src = 6-bit operand in bits 5-0)
+    _EIS = {"MUL": 0o070000, "DIV": 0o071000, "ASH": 0o072000,
+            "ASHC": 0o073000, "XOR": 0o074000}
+
+    def eis(self, op, reg, src):
+        sspec, sx = ea(src)
+        words = [self._EIS[op] | ((reg & 7) << 6) | sspec] + sx
+        self._emit(len(words), lambda L, a: words)
+
+    def mfps(self, dst):
+        # MFPS dst  (1067DD) — move PSW low byte to dst
+        dspec, dx = ea(dst)
+        words = [0o106700 | dspec] + dx
+        self._emit(len(words), lambda L, a: words)
+
     def halt(self):
         self._emit(1, lambda L, a: [0])
 

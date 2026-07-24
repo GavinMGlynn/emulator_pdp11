@@ -27,8 +27,9 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | CPU single/double-operand set | **working** (P1a) | 90-instr `alu` battery byte-identical to SimH; unit tests |
 | CPU branches / JMP / JSR / RTS / SOB / cc-ops | **working** (P1b) | `flow` probe (loop+subroutine) byte-identical to SimH; unit tests |
 | Traps: BPT/IOT/EMT/TRAP/RTI/RTT + T-bit trace | **working** (P2a) | `trap`+`trace` probes byte-identical to SimH; unit tests |
+| EIS (MUL/DIV/ASH/ASHC/XOR) | **working** (P2c) | `eis` probe (14 cases, results+flags) byte-identical to SimH |
+| Memory-mapped PSW (0177776) | **working** | read/written the hardware way; `eis` probe + unit test |
 | Reserved-instruction / odd-address traps | not started (P2b) | — |
-| EIS (MUL/DIV/ASH/ASHC/XOR) | not started (P2c) | — |
 | Interrupts (BR4-7 priority) / PIRQ | not started (P2d) | — |
 | MMU (KT11, 22-bit, I/D) | not started | — |
 | Cache + Unibus/Massbus timing | not started | — (the cycle-accuracy core) |

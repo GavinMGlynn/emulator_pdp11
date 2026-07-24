@@ -15,6 +15,9 @@ Status values: `open` · `confirmed` (matches oracle) · `fixed` · `divergence`
 | `trap` (P2a): TRAP → handler → RTI | R0=1 R1=1 R2=0100, stack PC=001014 PSW=004 | SimH 11/70 identical | confirmed | Validates do_trap push order (PSW then PC) and RTI pop order. |
 | `trace` (P2a): T-bit set via RTI, one traced instruction | stack PC=001016 PSW=020 | **initially diverged** (we pushed 001020/024) → now identical | **fixed** | Oracle caught it: SimH (KB11-C) takes an RTI-restored T-bit trace trap *immediately*, before the next instruction; RTT defers it. We were tracing *after* the instruction. Read `pdp11_cpu.c:1076` ("RTI immed trap"); restructured to service the pending trace at the top of the loop. The documented RTI-vs-RTT difference. |
 
+| `eis` (P2c): MUL/DIV/ASH/ASHC/XOR over 14 flag-critical cases, PSW snapshotted after each via @#177776 | results + PSW all identical | SimH 11/70 identical | confirmed | Implemented directly from SimH case 007 (MUL carry, /0 → N=0 Z=V=C=1, /overflow → V=1, ASH/ASHC shift-out & overflow). Semantics matched first try. |
+| MFPS/MTPS on the 11/70 | first attempt implemented them as valid | SimH traps them (illegal) | **fixed** (removed) | The EIS probe used MFPS to snapshot the PSW; SimH 11/70 *trapped* (MFPS/MTPS are gated behind HAS_MXPS — LSI/34-class only, not the 11/70). Removed them; read the PSW via its memory-mapped address 0177776 instead. Re-enable per-model at P10. |
+
 ## Timing (DEC paper oracle) — none yet
 Timing campaigns begin at P4. Each row will cite the KB11-C manual page/table it
 derives from, since SimH cannot verify cycle counts.

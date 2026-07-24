@@ -280,6 +280,60 @@ static void test_rti_pops_pc_then_psw(void) {
     TEST_ASSERT_EQUAL_HEX16(0002000u, cpu->r[PDP11_SP]);
 }
 
+static void test_mul_produces_a_32_bit_product_across_the_register_pair(void) {
+    cpu->r[PDP11_R0] = 0000010u; // 8
+    cpu->r[PDP11_R1] = 0;
+    const uint16_t prog[] = {0070027u, 0000005u}; // MUL #5, R0
+    deposit(001000, prog, 2);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0u, cpu->r[PDP11_R0]);      // high word
+    TEST_ASSERT_EQUAL_HEX16(0000050u, cpu->r[PDP11_R1]); // low word = 40
+    TEST_ASSERT_FALSE(cpu->psw & PDP11_PSW_C);
+}
+
+static void test_div_by_zero_sets_v_and_c(void) {
+    cpu->r[PDP11_R0] = 0;
+    cpu->r[PDP11_R1] = 0000012u;
+    const uint16_t prog[] = {0071027u, 0000000u}; // DIV #0, R0
+    deposit(001000, prog, 2);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_TRUE(cpu->psw & PDP11_PSW_V);
+    TEST_ASSERT_TRUE(cpu->psw & PDP11_PSW_C);
+    TEST_ASSERT_TRUE(cpu->psw & PDP11_PSW_Z);
+    TEST_ASSERT_FALSE(cpu->psw & PDP11_PSW_N);
+}
+
+static void test_ash_shifts_left_and_records_the_last_bit_shifted_out(void) {
+    cpu->r[PDP11_R0] = 0000005u; // 101b
+    const uint16_t prog[] = {0072027u, 0000003u}; // ASH #3, R0
+    deposit(001000, prog, 2);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0000050u, cpu->r[PDP11_R0]); // 5 << 3 = 40
+}
+
+static void test_xor_toggles_bits_and_leaves_carry_alone(void) {
+    cpu->psw = PDP11_PSW_C;
+    cpu->r[PDP11_R0] = 0125252u;
+    cpu->r[PDP11_R2] = 0052525u;
+    const uint16_t prog[] = {0074002u}; // XOR R0, R2
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0177777u, cpu->r[PDP11_R2]);
+    TEST_ASSERT_TRUE(cpu->psw & PDP11_PSW_C); // C unchanged
+    TEST_ASSERT_TRUE(cpu->psw & PDP11_PSW_N);
+}
+
+static void test_the_psw_is_readable_at_its_io_page_address(void) {
+    cpu->psw = PDP11_PSW_N | PDP11_PSW_C;
+    // MOV @#177776, R0 : src mode 3 reg 7 (absolute), dst R0
+    const uint16_t prog[] = {0013700u, 0177776u};
+    deposit(001000, prog, 2);
+    pdp11_cpu_step(cpu);
+    // R0 gets the PSW value; MOV then updates N,Z from it (C preserved).
+    TEST_ASSERT_EQUAL_HEX16((uint16_t)(PDP11_PSW_N | PDP11_PSW_C),
+                            cpu->r[PDP11_R0]);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -307,5 +361,10 @@ int main(void) {
     RUN_TEST(test_sec_sets_and_clc_clears_the_carry_flag);
     RUN_TEST(test_trap_pushes_psw_then_pc_and_vectors_through_034);
     RUN_TEST(test_rti_pops_pc_then_psw);
+    RUN_TEST(test_mul_produces_a_32_bit_product_across_the_register_pair);
+    RUN_TEST(test_div_by_zero_sets_v_and_c);
+    RUN_TEST(test_ash_shifts_left_and_records_the_last_bit_shifted_out);
+    RUN_TEST(test_xor_toggles_bits_and_leaves_carry_alone);
+    RUN_TEST(test_the_psw_is_readable_at_its_io_page_address);
     return UNITY_END();
 }

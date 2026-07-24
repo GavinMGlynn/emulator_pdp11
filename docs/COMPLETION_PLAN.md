@@ -36,8 +36,11 @@ Verification legend: **[A]** = architectural diff vs SimH oracle;
       `trace` probes byte-identical to SimH.
 - [ ] **P2b** Reserved/illegal-instruction trap (vec 10) and odd-address / bus
       trap (vec 4); stack-limit (vec 4 yellow/red).
-- [ ] **P2c** EIS: MUL, DIV, ASH, ASHC, XOR.
-- [ ] **P2d** 7-level BR interrupt priority + arbitration; PIRQ/PIR; RESET/WAIT.
+- [x] **P2c** EIS: MUL, DIV, ASH, ASHC, XOR. **[A]** `eis` probe (14 cases,
+      results + flags via the memory-mapped PSW at 0177776) byte-identical to
+      SimH. (MFPS/MTPS confirmed illegal on the 11/70 — deferred to per-model P10.)
+- [ ] **P2d** 7-level BR interrupt priority + arbitration; PIRQ/PIR; RESET/WAIT;
+      MARK. Then P2b's reserved/odd-address traps close out P2.
 - *Verify:* trap/interrupt probes **[A]**; EIS probes **[A]**. Timing **[T]** at P4.
 
 ## P3 — Memory management (KT11, 22-bit)

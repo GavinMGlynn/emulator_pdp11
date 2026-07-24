@@ -117,6 +117,27 @@ static uint16_t width_msb(bool bytemode) { return bytemode ? 0200u : 0100000u; }
 static uint16_t width_mask(bool bytemode) { return bytemode ? 0377u : 0177777u; }
 static uint32_t width_carry(bool bytemode) { return bytemode ? 0400u : 0200000u; }
 
+// The Processor Status word is memory-mapped at the top of the I/O page. Full
+// Unibus I/O-page decoding arrives with the devices (P6); for now only the PSW
+// register is decoded so software (and probes) can read/write it the hardware
+// way. The address is the 16-bit alias of 17777776.
+#define IOPAGE_PSW 0177776u
+
+static uint16_t cpu_read_word(const pdp11_cpu *cpu, uint32_t addr) {
+    if ((addr & 0177777u) == IOPAGE_PSW) {
+        return cpu->psw;
+    }
+    return pdp11_mem_read_word(cpu->mem, addr);
+}
+
+static void cpu_write_word(pdp11_cpu *cpu, uint32_t addr, uint16_t value) {
+    if ((addr & 0177777u) == IOPAGE_PSW) {
+        cpu->psw = value; // T-bit write rules land with the full I/O page
+        return;
+    }
+    pdp11_mem_write_word(cpu->mem, addr, value);
+}
+
 // Read/write an operand at the natural width. A byte read yields 0..255; a byte
 // write to a register touches only the low byte (MOVB's sign-extension is the
 // one exception, handled in op_mov).
@@ -125,7 +146,7 @@ static uint16_t read_operand(const pdp11_cpu *cpu, operand op, bool bytemode) {
         return bytemode ? (uint16_t)(cpu->r[op.reg] & 0377u) : cpu->r[op.reg];
     }
     return bytemode ? pdp11_mem_read_byte(cpu->mem, op.addr)
-                    : pdp11_mem_read_word(cpu->mem, op.addr);
+                    : cpu_read_word(cpu, op.addr);
 }
 
 static void write_operand(pdp11_cpu *cpu, operand op, bool bytemode,
@@ -137,7 +158,7 @@ static void write_operand(pdp11_cpu *cpu, operand op, bool bytemode,
     } else if (bytemode) {
         pdp11_mem_write_byte(cpu->mem, op.addr, (uint8_t)value);
     } else {
-        pdp11_mem_write_word(cpu->mem, op.addr, value);
+        cpu_write_word(cpu, op.addr, value);
     }
 }
 
@@ -385,10 +406,18 @@ static bool try_single_op(pdp11_cpu *cpu, uint16_t word) {
         single_op(cpu, word, 0003, false);
         return true;
     }
-    if (base >= 0050 && base <= 0067) {
+    if (base >= 0050 && base <= 0063) { // CLR..ASL (word + byte)
         single_op(cpu, word, base, bytemode);
         return true;
     }
+    if (!bytemode && base == 0067) { // SXT (word)
+        single_op(cpu, word, 0067, false);
+        return true;
+    }
+    // Not on the 11/70 / handled elsewhere: MARK (word 0064), MFPI/MTPI/MFPD/
+    // MTPD (0065/0066, MMU — P3), MTPS/MFPS (byte 0064/0067 — LSI models only,
+    // illegal on the 11/70). These currently fall through; a reserved-
+    // instruction trap for the truly-illegal ones lands in P2b.
     return false;
 }
 
@@ -523,8 +552,143 @@ static void op_rti(pdp11_cpu *cpu, bool is_rtt) {
     }
 }
 
+// --- EIS: MUL, DIV, ASH, ASHC, XOR ------------------------------------------
+// Register is bits 8-6; the operand is the low 6 bits. Semantics mirror the
+// KB11-C exactly (SimH pdp11_cpu.c case 007), including the J11/11-70 divide
+// error compatibility cases. Verified against the oracle by the `eis` probe.
+static int16_t sext16(uint16_t v) { return (int16_t)v; }
+
+static void op_mul(pdp11_cpu *cpu, uint16_t word) {
+    uint8_t reg = (uint8_t)((word >> 6) & 07u);
+    operand s = decode_operand(cpu, (uint8_t)(word & 077u), false);
+    int32_t src2 = sext16(read_operand(cpu, s, false));
+    int32_t src = sext16(cpu->r[reg]);
+    int32_t dst = src * src2;
+    cpu->r[reg] = (uint16_t)((uint32_t)dst >> 16);
+    cpu->r[reg | 1] = (uint16_t)((uint32_t)dst & 0177777u);
+    set_flag(cpu, PDP11_PSW_N, dst < 0);
+    set_flag(cpu, PDP11_PSW_Z, dst == 0);
+    set_flag(cpu, PDP11_PSW_V, false);
+    set_flag(cpu, PDP11_PSW_C, (dst > 32767) || (dst < -32768));
+}
+
+static void op_div(pdp11_cpu *cpu, uint16_t word) {
+    uint8_t reg = (uint8_t)((word >> 6) & 07u);
+    operand s = decode_operand(cpu, (uint8_t)(word & 077u), false);
+    uint16_t src2u = read_operand(cpu, s, false);
+    uint32_t srcu = ((uint32_t)cpu->r[reg] << 16) | cpu->r[reg | 1];
+
+    if (src2u == 0) { // divide by zero (J11/11-70: N=0, Z=V=C=1)
+        set_flag(cpu, PDP11_PSW_N, false);
+        set_flag(cpu, PDP11_PSW_Z, true);
+        set_flag(cpu, PDP11_PSW_V, true);
+        set_flag(cpu, PDP11_PSW_C, true);
+        return;
+    }
+    if (srcu == 020000000000u && src2u == 0177777u) { // -2^31 / -1 overflow
+        set_flag(cpu, PDP11_PSW_V, true);
+        set_flag(cpu, PDP11_PSW_N, false);
+        set_flag(cpu, PDP11_PSW_Z, false);
+        set_flag(cpu, PDP11_PSW_C, false);
+        return;
+    }
+    int32_t src2 = sext16(src2u);
+    int32_t src = (int32_t)srcu; // sign already in bit 31
+    int32_t dst = src / src2;
+    set_flag(cpu, PDP11_PSW_N, dst < 0);
+    if (dst > 32767 || dst < -32768) { // quotient doesn't fit in 16 bits
+        set_flag(cpu, PDP11_PSW_V, true);
+        set_flag(cpu, PDP11_PSW_Z, false);
+        set_flag(cpu, PDP11_PSW_C, false);
+        return;
+    }
+    int32_t rem = src - src2 * dst;
+    cpu->r[reg] = (uint16_t)((uint32_t)dst & 0177777u);
+    cpu->r[reg | 1] = (uint16_t)((uint32_t)rem & 0177777u);
+    set_flag(cpu, PDP11_PSW_Z, dst == 0);
+    set_flag(cpu, PDP11_PSW_V, false);
+    set_flag(cpu, PDP11_PSW_C, false);
+}
+
+static void op_ash(pdp11_cpu *cpu, uint16_t word) {
+    uint8_t reg = (uint8_t)((word >> 6) & 07u);
+    operand s = decode_operand(cpu, (uint8_t)(word & 077u), false);
+    int32_t sh = (int32_t)(read_operand(cpu, s, false) & 077u); // 0..63 shift code
+    int32_t sign = (cpu->r[reg] & 0100000u) ? 1 : 0;
+    int32_t src = sign ? (int32_t)(cpu->r[reg] | ~077777u) : (int32_t)cpu->r[reg];
+    int32_t dst;
+    bool v = false, c = false;
+
+    if (sh == 0) {
+        dst = src;
+    } else if (sh <= 15) { // left 1..15
+        dst = (int32_t)((uint32_t)src << sh);
+        int32_t i = (src >> (16 - sh)) & 0177777;
+        v = (i != ((dst & 0100000) ? 0177777 : 0));
+        c = (i & 1) != 0;
+    } else if (sh <= 31) { // left 16..31 -> all bits out
+        dst = 0;
+        v = (src != 0);
+        c = ((uint32_t)src << (sh - 16) & 1u) != 0;
+    } else if (sh == 32) { // right 32
+        dst = -sign;
+        c = sign != 0;
+    } else { // right 31..1  (sh 33..63)
+        dst = (src >> (64 - sh)) | (int32_t)((uint32_t)(-sign) << (sh - 32));
+        c = ((src >> (63 - sh)) & 1) != 0;
+    }
+    cpu->r[reg] = (uint16_t)((uint32_t)dst & 0177777u);
+    set_nz(cpu, cpu->r[reg], false);
+    set_flag(cpu, PDP11_PSW_V, v);
+    set_flag(cpu, PDP11_PSW_C, c);
+}
+
+static void op_ashc(pdp11_cpu *cpu, uint16_t word) {
+    uint8_t reg = (uint8_t)((word >> 6) & 07u);
+    operand s = decode_operand(cpu, (uint8_t)(word & 077u), false);
+    int32_t sh = (int32_t)(read_operand(cpu, s, false) & 077u);
+    int32_t sign = (cpu->r[reg] & 0100000u) ? 1 : 0;
+    int32_t src = (int32_t)(((uint32_t)cpu->r[reg] << 16) | cpu->r[reg | 1]);
+    int32_t dst;
+    bool v = false, c = false;
+
+    if (sh == 0) {
+        dst = src;
+    } else if (sh <= 31) { // left 1..31
+        dst = (int32_t)((uint32_t)src << sh);
+        int32_t i = (int32_t)(((uint32_t)(src >> (32 - sh)))
+                              | ((uint32_t)(-sign) << sh));
+        v = (i != (dst < 0 ? -1 : 0));
+        c = (i & 1) != 0;
+    } else if (sh == 32) { // right 32
+        dst = -sign;
+        c = sign != 0;
+    } else { // right 31..1
+        dst = (int32_t)(((uint32_t)(src >> (64 - sh)))
+                        | ((uint32_t)(-sign) << (sh - 32)));
+        c = ((src >> (63 - sh)) & 1) != 0;
+    }
+    uint16_t hi = (uint16_t)((uint32_t)dst >> 16);
+    uint16_t lo = (uint16_t)((uint32_t)dst & 0177777u);
+    cpu->r[reg] = hi;
+    cpu->r[reg | 1] = lo;
+    set_flag(cpu, PDP11_PSW_N, (hi & 0100000u) != 0);
+    set_flag(cpu, PDP11_PSW_Z, (hi | lo) == 0);
+    set_flag(cpu, PDP11_PSW_V, v);
+    set_flag(cpu, PDP11_PSW_C, c);
+}
+
+static void op_xor(pdp11_cpu *cpu, uint16_t word) {
+    uint8_t reg = (uint8_t)((word >> 6) & 07u);
+    operand d = decode_operand(cpu, (uint8_t)(word & 077u), false);
+    uint16_t result = (uint16_t)(read_operand(cpu, d, false) ^ cpu->r[reg]);
+    write_operand(cpu, d, false, result);
+    set_nz(cpu, result, false);
+    set_flag(cpu, PDP11_PSW_V, false);
+}
+
 // Decode the groups that aren't clean double-operand opcodes: single-operand
-// instructions, branches, JMP/JSR/RTS/SOB, condition-code ops, HALT.
+// instructions, branches, JMP/JSR/RTS/SOB, condition-code ops, EIS, HALT.
 static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
     if (try_single_op(cpu, word)) {
         return;
@@ -540,6 +704,16 @@ static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
         op_ccops(cpu, word);
     } else if ((word & 0177000u) == 0004000) {
         op_jsr(cpu, word);
+    } else if ((word & 0177000u) == 0070000) {
+        op_mul(cpu, word);
+    } else if ((word & 0177000u) == 0071000) {
+        op_div(cpu, word);
+    } else if ((word & 0177000u) == 0072000) {
+        op_ash(cpu, word);
+    } else if ((word & 0177000u) == 0073000) {
+        op_ashc(cpu, word);
+    } else if ((word & 0177000u) == 0074000) {
+        op_xor(cpu, word);
     } else if ((word & 0177000u) == 0077000) {
         op_sob(cpu, word);
     } else if ((word & 0177400u) == 0104000) {
