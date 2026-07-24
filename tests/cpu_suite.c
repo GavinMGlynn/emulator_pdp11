@@ -483,6 +483,20 @@ static void test_mfpi_reads_the_previous_modes_space_and_pushes_it(void) {
                             pdp11_mem_read_word(cpu->mem, 0000776u)); // user value
 }
 
+static void test_data_references_use_d_space_when_it_is_enabled(void) {
+    cpu->pdr[0] = 0077406u;            // kernel I code page
+    cpu->pdr[(1 << 3) | 2] = 0077406u; // kernel D page 2 (idx 10)
+    cpu->par[(1 << 3) | 2] = 0001000u; // kernel D page 2 -> PA 0100000
+    cpu->mmr3 = 0000024u;             // KDS | M22E (kernel D-space enabled)
+    cpu->mmr0 = 0000001u;
+    pdp11_mem_write_word(cpu->mem, 0100000u, 0122222u);
+    cpu->r[PDP11_R1] = 0040000u;      // VA page 2
+    const uint16_t prog[] = {0011100u}; // MOV (R1), R0 — a data reference
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0122222u, cpu->r[PDP11_R0]); // read via D-space
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -526,5 +540,6 @@ int main(void) {
     RUN_TEST(test_a_write_to_a_read_only_page_aborts_through_vector_250);
     RUN_TEST(test_r0_r5_are_banked_by_the_psw_register_set_bit);
     RUN_TEST(test_mfpi_reads_the_previous_modes_space_and_pushes_it);
+    RUN_TEST(test_data_references_use_d_space_when_it_is_enabled);
     return UNITY_END();
 }

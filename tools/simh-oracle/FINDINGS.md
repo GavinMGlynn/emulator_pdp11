@@ -30,6 +30,8 @@ Status values: `open` · `confirmed` (matches oracle) · `fixed` · `divergence`
 
 | `mfp` (P3b): kernel (current) reads user (previous) VA 020000 via MFPI, user PAR maps it to PA 0100000 | R2=0123456 | SimH 11/70 identical | confirmed | Validates mode-generalized relocation (cpu_read_word_mode), MFPI's previous-mode read + push, and user-mode PAR mapping. |
 
+| `idspace` (P3b): kernel D-space enabled, D page 2 -> PA 0100000 (0122222); a `(R1)` data read of VA 040000 | R0=0122222 | SimH 11/70 identical | confirmed | Validates data refs use D-space while fetches use I-space. Oracle caught a *probe* bug first: an initial value 0222222 exceeds 16 bits, which SimH's deposit rejects (stayed 0) while our loader masked it — a false divergence until the probe used a 16-bit value. |
+
 ## Timing (DEC paper oracle) — none yet
 Timing campaigns begin at P4. Each row will cite the KB11-C manual page/table it
 derives from, since SimH cannot verify cycle counts.

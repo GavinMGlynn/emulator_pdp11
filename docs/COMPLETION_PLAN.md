@@ -68,9 +68,16 @@ goldens + 36 unit tests, green on debug and release.
 - [x] **P3b** MFPI/MTPI/MFPD/MTPD via mode-generalized relocation (cpu_read/
       write_word_mode); `regset` (register sets) and `mfp` (kernel reads user
       space through the previous-mode mapping) probes byte-identical to SimH.
-      Remaining tail: full I/D-space separation (distinct I/D registers when MMR3
-      enables D-space; V6/V7-nonsep don't use it) and kernel-forced vector reads
-      for user-mode traps.
+      **[A]** `mfp` probe byte-identical to SimH.
+- [x] **P3b** Full I/D-space separation: instruction fetch + inline immediate/
+      absolute words use I-space; data + stack + pointers use D-space (per-mode
+      MMR3 enable); trap vectors read in Kernel D-space. **[A]** `idspace` probe
+      byte-identical to SimH.
+
+**P3 COMPLETE.** The KT11 MMU: 22-bit relocation, access-control/page-length
+aborts, dual register sets, per-mode SP banking, MFPI/MTPI/MFPD/MTPD, and I/D
+separation — 5 MMU goldens + unit tests. Small tails: MMR1/MMR2 (auto-inc/dec
+recovery) and stack-limit yellow/red.
 - [x] **P3c** Access control (PDR ACF) + page-length aborts → vector 0250, with
       MMR0 status capture (NR/RO/PL error, faulting page, IC bit) and PDR A/W
       flags. A red-stack runaway guard prevents an infinite nested-abort loop

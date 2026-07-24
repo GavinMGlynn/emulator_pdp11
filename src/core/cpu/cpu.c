@@ -71,6 +71,7 @@ void pdp11_cpu_reset(pdp11_cpu *cpu) {
 // defined below. Word accesses fault on odd addresses.
 static uint16_t cpu_read_word(pdp11_cpu *cpu, uint32_t va);
 static void cpu_write_word(pdp11_cpu *cpu, uint32_t va, uint16_t value);
+static uint16_t cpu_fetch_word(pdp11_cpu *cpu, uint32_t va);
 static uint8_t cpu_read_byte(pdp11_cpu *cpu, uint32_t va);
 static void cpu_write_byte(pdp11_cpu *cpu, uint32_t va, uint8_t value);
 static void push_word(pdp11_cpu *cpu, uint16_t value);
@@ -79,7 +80,7 @@ static uint16_t pop_word(pdp11_cpu *cpu);
 // --- Instruction fetch ------------------------------------------------------
 // Read the word at the PC and advance the PC by two.
 static uint16_t fetch(pdp11_cpu *cpu) {
-    uint16_t word = cpu_read_word(cpu, cpu->r[PDP11_PC]);
+    uint16_t word = cpu_fetch_word(cpu, cpu->r[PDP11_PC]); // instruction space
     cpu->r[PDP11_PC] = (uint16_t)(cpu->r[PDP11_PC] + 2u);
     return word;
 }
@@ -90,8 +91,10 @@ static uint16_t fetch(pdp11_cpu *cpu) {
 // hardware's source-then-destination order (the caller decodes src before dst).
 typedef struct {
     bool is_reg;
+    bool is_imm;   // immediate (#n): value fetched from the instruction stream
     uint8_t reg;   // valid when is_reg
-    uint32_t addr; // valid when !is_reg (16-bit for now)
+    uint16_t imm;  // valid when is_imm
+    uint32_t addr; // valid when !is_reg && !is_imm (16-bit for now)
 } operand;
 
 // Autoincrement/decrement step: 2 for words; 1 for bytes, except SP and PC
@@ -113,13 +116,23 @@ static operand decode_operand(pdp11_cpu *cpu, uint8_t spec, bool bytemode) {
     case 1: // (Rn) — register deferred
         op.addr = cpu->r[reg];
         break;
-    case 2: // (Rn)+ — autoincrement  (PC: immediate #n)
-        op.addr = cpu->r[reg];
-        cpu->r[reg] = (uint16_t)(cpu->r[reg] + operand_step(reg, bytemode));
+    case 2: // (Rn)+ — autoincrement  (PC: immediate #n, from I-space)
+        if (reg == PDP11_PC) {
+            op.addr = cpu->r[PDP11_PC]; // inline location (for a dest write)
+            op.is_imm = true;
+            op.imm = fetch(cpu);        // value from the instruction stream
+        } else {
+            op.addr = cpu->r[reg];
+            cpu->r[reg] = (uint16_t)(cpu->r[reg] + operand_step(reg, bytemode));
+        }
         break;
-    case 3: // @(Rn)+ — autoincrement deferred  (PC: absolute @#A)
-        op.addr = cpu_read_word(cpu, cpu->r[reg]);
-        cpu->r[reg] = (uint16_t)(cpu->r[reg] + 2u);
+    case 3: // @(Rn)+ — autoincrement deferred  (PC: absolute @#A, A from I-space)
+        if (reg == PDP11_PC) {
+            op.addr = fetch(cpu); // the address word A is in the instruction stream
+        } else {
+            op.addr = cpu_read_word(cpu, cpu->r[reg]); // pointer is data (D-space)
+            cpu->r[reg] = (uint16_t)(cpu->r[reg] + 2u);
+        }
         break;
     case 4: // -(Rn) — autodecrement
         cpu->r[reg] = (uint16_t)(cpu->r[reg] - operand_step(reg, bytemode));
@@ -215,6 +228,9 @@ static void put_psw(pdp11_cpu *cpu, uint16_t new_psw) {
 #define MMR0_PL    0040000u // page-length error
 #define MMR0_NR    0100000u // non-resident (no access)
 #define MMR0_FREEZE 0160000u // any error bit -> MMR0 frozen
+#define MMR3_UDS   0000001u // user D-space enable
+#define MMR3_SDS   0000002u // supervisor D-space enable
+#define MMR3_KDS   0000004u // kernel D-space enable
 #define MMR3_M22E  0000020u // 22-bit enable
 #define PDR_ACF    0000007u // access-control field
 #define PDR_ED     0000010u // expansion direction (1 = downward)
@@ -243,17 +259,21 @@ static uint16_t acf_violation(uint16_t acf, bool is_write) {
     }
 }
 
+// Per-mode MMR3 D-space enable bits (mode 2 is unused).
+static const uint16_t dsmask[4] = {MMR3_KDS, MMR3_SDS, 0, MMR3_UDS};
+
 // Relocate a 16-bit virtual address to a physical address in a given processor
-// mode (0=Kernel 1=Super 3=User), enforcing the PDR access-control and page-
-// length checks (aborting through vector 0250 on a violation, after recording
-// the page and error in MMR0). Management off is the identity in the low 56 KB,
-// folding the top 8 KB onto the I/O page (SimH relocR). Full I/D-space
-// separation (distinct instruction/data registers) is a P3b tail — while MMR3
-// D-space is disabled, all references use the I-space registers as here.
+// mode (0=Kernel 1=Super 3=User) and space (dspace = data reference). Enforces
+// the PDR access-control and page-length checks (aborting through vector 0250 on
+// a violation, after recording the page and error in MMR0). When MMR3 D-space is
+// disabled for the mode, data references fall back to the I-space registers.
+// Management off is the identity in the low 56 KB, folding the top 8 KB onto the
+// I/O page (SimH relocR).
 static uint32_t mmu_relocate(pdp11_cpu *cpu, uint16_t va, bool is_write,
-                             int mode) {
+                             int mode, bool dspace) {
     if (cpu->mmr0 & MMR0_MME) {
-        int idx = (mode << 4) | ((va >> 13) & 07); // dspace 0 for now
+        int ds = (dspace && (cpu->mmr3 & dsmask[mode])) ? 1 : 0;
+        int idx = (mode << 4) | (ds << 3) | ((va >> 13) & 07);
         uint16_t pdr = cpu->pdr[idx];
 
         uint16_t err = acf_violation(pdr & PDR_ACF, is_write);
@@ -354,23 +374,26 @@ static void io_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
 
 static int cur_mode(const pdp11_cpu *cpu) { return (cpu->psw >> 14) & 03; }
 
-// Word access in an explicit mode (used by MFPx/MTPx to reach the previous
-// mode's space); the plain versions use the current mode.
-static uint16_t cpu_read_word_mode(pdp11_cpu *cpu, uint32_t va, int mode) {
+// Word access in an explicit mode and space (used by MFPx/MTPx to reach the
+// previous mode's I- or D-space); the plain versions use the current mode and
+// data (D) space, and cpu_fetch_word uses the current mode's instruction (I)
+// space for the instruction stream.
+static uint16_t cpu_read_word_gen(pdp11_cpu *cpu, uint32_t va, int mode,
+                                  bool dspace) {
     if (va & 1u) { // a word reference to an odd address traps through vector 4
         cpu_bus_fault(cpu, VEC_BUS);
     }
-    uint32_t pa = mmu_relocate(cpu, (uint16_t)va, false, mode);
+    uint32_t pa = mmu_relocate(cpu, (uint16_t)va, false, mode, dspace);
     return is_iopage(pa) ? io_read(cpu, (uint16_t)(pa & 0177777u))
                          : pdp11_mem_read_word(cpu->mem, pa);
 }
 
 static void cpu_write_word_mode(pdp11_cpu *cpu, uint32_t va, int mode,
-                                uint16_t value) {
+                                bool dspace, uint16_t value) {
     if (va & 1u) {
         cpu_bus_fault(cpu, VEC_BUS);
     }
-    uint32_t pa = mmu_relocate(cpu, (uint16_t)va, true, mode);
+    uint32_t pa = mmu_relocate(cpu, (uint16_t)va, true, mode, dspace);
     if (is_iopage(pa)) {
         io_write(cpu, (uint16_t)(pa & 0177777u), value);
     } else {
@@ -378,16 +401,26 @@ static void cpu_write_word_mode(pdp11_cpu *cpu, uint32_t va, int mode,
     }
 }
 
+// MFPx reaches the previous mode's I-space (MFPI) or D-space (MFPD).
+static uint16_t cpu_read_word_mode(pdp11_cpu *cpu, uint32_t va, int mode,
+                                   bool dspace) {
+    return cpu_read_word_gen(cpu, va, mode, dspace);
+}
+
+static uint16_t cpu_fetch_word(pdp11_cpu *cpu, uint32_t va) {
+    return cpu_read_word_gen(cpu, va, cur_mode(cpu), false); // I-space
+}
+
 static uint16_t cpu_read_word(pdp11_cpu *cpu, uint32_t va) {
-    return cpu_read_word_mode(cpu, va, cur_mode(cpu));
+    return cpu_read_word_gen(cpu, va, cur_mode(cpu), true); // D-space
 }
 
 static void cpu_write_word(pdp11_cpu *cpu, uint32_t va, uint16_t value) {
-    cpu_write_word_mode(cpu, va, cur_mode(cpu), value);
+    cpu_write_word_mode(cpu, va, cur_mode(cpu), true, value); // D-space
 }
 
 static uint8_t cpu_read_byte(pdp11_cpu *cpu, uint32_t va) {
-    uint32_t pa = mmu_relocate(cpu, (uint16_t)va, false, cur_mode(cpu));
+    uint32_t pa = mmu_relocate(cpu, (uint16_t)va, false, cur_mode(cpu), true);
     if (is_iopage(pa)) {
         uint16_t w = io_read(cpu, (uint16_t)(pa & 0177776u));
         return (uint8_t)((pa & 1u) ? (w >> 8) : (w & 0377u));
@@ -396,7 +429,7 @@ static uint8_t cpu_read_byte(pdp11_cpu *cpu, uint32_t va) {
 }
 
 static void cpu_write_byte(pdp11_cpu *cpu, uint32_t va, uint8_t value) {
-    uint32_t pa = mmu_relocate(cpu, (uint16_t)va, true, cur_mode(cpu));
+    uint32_t pa = mmu_relocate(cpu, (uint16_t)va, true, cur_mode(cpu), true);
     if (is_iopage(pa)) {
         uint16_t reg = (uint16_t)(pa & 0177776u);
         uint16_t w = io_read(cpu, reg);
@@ -414,6 +447,9 @@ static void cpu_write_byte(pdp11_cpu *cpu, uint32_t va, uint8_t value) {
 static uint16_t read_operand(pdp11_cpu *cpu, operand op, bool bytemode) {
     if (op.is_reg) {
         return bytemode ? (uint16_t)(cpu->r[op.reg] & 0377u) : cpu->r[op.reg];
+    }
+    if (op.is_imm) {
+        return bytemode ? (uint16_t)(op.imm & 0377u) : op.imm;
     }
     return bytemode ? cpu_read_byte(cpu, op.addr)
                     : cpu_read_word(cpu, op.addr);
@@ -682,7 +718,7 @@ static void op_mark(pdp11_cpu *cpu, uint16_t word) {
 // stack and store into the previous mode. R6 refers to the previous mode's
 // stack pointer when the modes differ. (I and D spaces coincide while MMR3
 // D-space is disabled — the distinction is a P3b tail.)
-static void op_mfp(pdp11_cpu *cpu, uint16_t word) {
+static void op_mfp(pdp11_cpu *cpu, uint16_t word, bool dspace) {
     int pm = (cpu->psw >> 12) & 03;
     int cm = cur_mode(cpu);
     operand src = decode_operand(cpu, (uint8_t)(word & 077u), false);
@@ -691,14 +727,14 @@ static void op_mfp(pdp11_cpu *cpu, uint16_t word) {
         value = (src.reg == PDP11_SP && cm != pm) ? cpu->stackfile[pm]
                                                   : cpu->r[src.reg];
     } else {
-        value = cpu_read_word_mode(cpu, src.addr, pm);
+        value = cpu_read_word_mode(cpu, src.addr, pm, dspace);
     }
     set_nz(cpu, value, false);
     set_flag(cpu, PDP11_PSW_V, false);
     push_word(cpu, value);
 }
 
-static void op_mtp(pdp11_cpu *cpu, uint16_t word) {
+static void op_mtp(pdp11_cpu *cpu, uint16_t word, bool dspace) {
     int pm = (cpu->psw >> 12) & 03;
     int cm = cur_mode(cpu);
     uint16_t value = pop_word(cpu); // pop from the current stack first
@@ -712,7 +748,7 @@ static void op_mtp(pdp11_cpu *cpu, uint16_t word) {
             cpu->r[dst.reg] = value;
         }
     } else {
-        cpu_write_word_mode(cpu, dst.addr, pm, value);
+        cpu_write_word_mode(cpu, dst.addr, pm, dspace, value);
     }
 }
 
@@ -729,12 +765,12 @@ static bool try_single_op(pdp11_cpu *cpu, uint16_t word) {
         op_mark(cpu, word);
         return true;
     }
-    if (base == 0065) { // MFPI (word) / MFPD (byte-flagged)
-        op_mfp(cpu, word);
+    if (base == 0065) { // MFPI (I-space) / MFPD (D-space, byte-flagged)
+        op_mfp(cpu, word, bytemode);
         return true;
     }
-    if (base == 0066) { // MTPI (word) / MTPD (byte-flagged)
-        op_mtp(cpu, word);
+    if (base == 0066) { // MTPI (I-space) / MTPD (D-space, byte-flagged)
+        op_mtp(cpu, word, bytemode);
         return true;
     }
     if (base >= 0050 && base <= 0063) { // CLR..ASL (word + byte)
@@ -863,8 +899,9 @@ static void do_trap(pdp11_cpu *cpu, uint16_t vector) {
     uint16_t old_psw = cpu->psw;
     uint16_t old_pc = cpu->r[PDP11_PC];
     uint16_t old_mode = (uint16_t)((old_psw >> 14) & 03u);
-    uint16_t new_pc = cpu_read_word(cpu, vector);
-    uint16_t new_psw = cpu_read_word(cpu, (uint16_t)(vector + 2u));
+    // Trap vectors are always read in Kernel D-space, whatever mode we trap from.
+    uint16_t new_pc = cpu_read_word_gen(cpu, vector, 0, true);
+    uint16_t new_psw = cpu_read_word_gen(cpu, (uint16_t)(vector + 2u), 0, true);
     // The new PSW's previous-mode field records the mode we trapped from.
     new_psw = (uint16_t)((new_psw & ~0030000u) | ((uint32_t)old_mode << 12));
     // Switch mode/register set first, then push the old state on the new stack.
