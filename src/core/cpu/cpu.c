@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include "clk/clk.h"
+#include "console/console.h"
 #include "fp/fp.h"
 #include "timing/timing.h"
 
@@ -82,6 +83,13 @@ void pdp11_cpu_reset(pdp11_cpu *cpu) {
     cpu->clk_csr = KW11L_DONE; // the monitor bit powers up set (SimH clk_reset)
     cpu->clk_tick_ns = 1000000000u / 60u;
     cpu->clk_next_ns = cpu->clk_tick_ns;
+    // DL11 console: the receiver powers up idle (no character), the transmitter
+    // ready (DONE set) so software can send at once. (SimH tti/tto_reset.)
+    cpu->tti_csr = 0;
+    cpu->tti_buf = 0;
+    cpu->tto_csr = DL11_DONE;
+    cpu->tto_buf = 0;
+    cpu->tto_busy = false;
     pdp11_cache_reset(&cpu->cache);
 }
 
@@ -211,6 +219,8 @@ static int highest_pir_level(uint16_t pirq) {
 // Device interrupt table: each PDP11_INT_* id maps to a BR level and vector.
 static const struct { uint8_t ipl; uint16_t vec; } int_tab[] = {
     [PDP11_INT_CLK] = {KW11L_IPL, KW11L_VEC},
+    [PDP11_INT_TTI] = {DL11_IPL, DL11_RVEC},
+    [PDP11_INT_TTO] = {DL11_IPL, DL11_XVEC},
 };
 #define NUM_INT (sizeof int_tab / sizeof int_tab[0])
 
@@ -389,6 +399,9 @@ static uint16_t io_read(pdp11_cpu *cpu, uint16_t a) {
     case 0177572u:    return cpu->mmr0; // MMR0
     case 0172516u:    return cpu->mmr3; // MMR3
     case KW11L_LKS:   return pdp11_clk_read(cpu); // KW11-L line clock
+    case DL11_RCSR: case DL11_RBUF:
+    case DL11_XCSR: case DL11_XBUF:
+        return pdp11_console_read(cpu, a); // DL11 console
     default: break;
     }
     idx = apr_index(a, &is_par);
@@ -407,6 +420,9 @@ static void io_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
     case 0177572u:    cpu->mmr0 = value; return;
     case 0172516u:    cpu->mmr3 = value; return;
     case KW11L_LKS:   pdp11_clk_write(cpu, value); return; // KW11-L line clock
+    case DL11_RCSR: case DL11_RBUF:
+    case DL11_XCSR: case DL11_XBUF:
+        pdp11_console_write(cpu, a, value); return; // DL11 console
     default: break;
     }
     idx = apr_index(a, &is_par);
@@ -1162,6 +1178,9 @@ static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
         cpu->pirq = 0;
         cpu->int_req = 0;
         cpu->clk_csr = KW11L_DONE; // INIT sets the monitor bit (SimH clk_reset)
+        cpu->tti_csr = 0;          // DL11 receiver idle
+        cpu->tto_csr = DL11_DONE;  // DL11 transmitter ready
+        cpu->tto_busy = false;
     } else if ((word & 0177700u) == 0106400u  // MTPS  (LSI-only)
                || (word & 0177700u) == 0106700u  // MFPS  (LSI-only)
                || (word & 0177000u) == 0075000u  // FIS   (not on 11/70)
@@ -1724,5 +1743,9 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
     if (cpu->clk_tick_ns && cpu->time_ns >= cpu->clk_next_ns) {
         pdp11_clk_tick(cpu);
         cpu->clk_next_ns += cpu->clk_tick_ns;
+    }
+    // DL11 transmitter: complete a pending character transmit.
+    if (cpu->tto_busy) {
+        pdp11_console_tx_poll(cpu);
     }
 }

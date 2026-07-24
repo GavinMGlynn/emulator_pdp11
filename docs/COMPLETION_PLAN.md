@@ -153,9 +153,24 @@ recovery) and stack-limit yellow/red.
       byte-identical to SimH; tick→interrupt path via unit tests (SimH's clock is
       wall-clock-calibrated, so the tick *timing* can't be golden-diffed — the
       60 Hz rate cites the KW11-L manual, a **[T]** paper-oracle number).
-- [ ] **P6b** DL11 console SLU; **P6c** RK11/RK05; **P6d** RP04/06 via RH70;
-      **P6e** TM11/TU tape for install media.
+- [x] **P6b** DL11 console SLU (`src/core/console`): the receiver (RCSR 0177560 /
+      RBUF 0177562, vector 060) and transmitter (XCSR 0177564 / XBUF 0177566,
+      vector 064) register pairs, both BR4. Reading RBUF clears the receiver DONE;
+      writing XBUF emits the character to the frontend sink and models a
+      character-time transmit-busy window before DONE returns. Received input is
+      injected via `pdp11_console_input`. **[A]** `dl11` register probe
+      byte-identical to SimH (CSR IMP/RW masks, reset states); input/output and
+      the receiver/transmitter interrupts via unit tests (the transmit-busy timing
+      is wall-clock-calibrated in SimH, so it is not golden-diffed).
+- [ ] **P6c** RK11/RK05; **P6d** RP04/06 via RH70; **P6e** TM11/TU tape.
 - *Verify:* device-register probes **[A]**; XXDP/MAINDEC diagnostics pass **[C]**.
+  - *Documented tail (interrupt model):* our interrupt grant dispatches and ends
+    the step, re-checking interrupts before the handler's first instruction runs.
+    With a normal handler (whose vector PSW raises priority to the device level or
+    above) this is indistinguishable; only a pathological handler at priority 0
+    with the source still asserted storms where SimH would execute one handler
+    instruction first. Frontend TTY capture (wiring the console sink to stdout for
+    a boot-stream diff) lands with P7.
 
 ## P7 — Content boot (thermometer, not a goal)
 - [ ] Boot XXDP diagnostics, then Unix V6/V7 to a shell.

@@ -45,6 +45,17 @@ typedef struct pdp11_cpu {
     uint32_t clk_tick_ns;
     uint64_t clk_next_ns;
 
+    // DL11 console SLU (P6). Receiver (RCSR/RBUF) and transmitter (XCSR/XBUF)
+    // register pairs; the transmitter models a character-time busy window
+    // (tto_busy until tto_done_ns) after XBUF is written. Transmitted characters
+    // go to the console_out sink (set by the frontend), if any.
+    uint16_t tti_csr, tti_buf;
+    uint16_t tto_csr, tto_buf;
+    bool tto_busy;
+    uint64_t tto_done_ns;
+    void (*console_out)(void *ctx, uint8_t ch);
+    void *console_ctx;
+
     // KT11 memory management (P3). MMR0<0> enables relocation; MMR3<M22E>
     // selects 22-bit. The PAR/PDR file is indexed (mode<<4)|(dspace<<3)|page,
     // mode 0=Kernel 1=Super 3=User (2 unused).
@@ -100,7 +111,7 @@ void pdp11_cpu_step(pdp11_cpu *cpu);
 
 // Device interrupt ids (bit positions in int_req). Each maps to a BR level and
 // vector in cpu.c's interrupt table.
-enum { PDP11_INT_CLK = 0 };
+enum { PDP11_INT_CLK = 0, PDP11_INT_TTI = 1, PDP11_INT_TTO = 2 };
 
 // Raise/lower a device interrupt request. The CPU grants the highest-BR pending
 // request whose level exceeds the current PSW priority at an instruction

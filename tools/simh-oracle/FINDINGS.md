@@ -46,6 +46,8 @@ Status values: `open` · `confirmed` (matches oracle) · `fixed` · `divergence`
 
 | `clk` (P6a): KW11-L LKS register at 0177546 — read initial, set IE, try IE\|DONE, clear | R0=0200 (DONE set at power-up), R1=0100, R2=0100 (DONE not writable), R3=0 | SimH 11/70 identical | confirmed | The 11/70 has the monitor bit (SimH HAS_LTCM). Oracle caught our reset: SimH's clk_reset powers up with DONE set (`clk_csr = CSR_DONE`), which we now match. Tick→interrupt timing is *not* golden-diffed — SimH's clock is wall-clock-calibrated; verified by unit tests instead, with the 60 Hz rate a **[T]** paper-oracle number (KW11-L manual). |
 
+| `dl11` (P6b): DL11 console CSRs — read RCSR/XCSR initial, set/clear IE, read back (priority 7 masks interrupts) | R0=0 (rcv idle), R1=0200 (xmt ready), R2=0100, R3=0300, R4=0 | SimH 11/70 identical | confirmed | Receiver powers up idle, transmitter ready (SimH tti/tto_reset); only IE writable; reads expose DONE\|IE. The probe raises PSW to priority 7 first — the diagnosis being the finding: enabling the transmitter IE while DONE is set raises an immediate BR4 interrupt through the unset vector 064, which SimH survives (it runs the HALT at 0 before re-checking) but our grant-then-recheck model storms on. A pathological-vector edge case (documented tail); masked here so the probe tests just the CSR semantics. |
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|

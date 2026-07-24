@@ -3,6 +3,7 @@
 #include "unity.h"
 
 #include "clk/clk.h"
+#include "console/console.h"
 #include "cpu/cpu.h"
 
 static pdp11_cpu *cpu;
@@ -662,6 +663,49 @@ static void test_kw11l_writing_zero_to_done_clears_the_monitor_bit(void) {
     TEST_ASSERT_FALSE(cpu->clk_csr & KW11L_DONE);
 }
 
+static uint8_t tx_capture[64];
+static size_t tx_len;
+static void tx_sink(void *ctx, uint8_t ch) {
+    (void)ctx;
+    if (tx_len < sizeof tx_capture) {
+        tx_capture[tx_len++] = ch;
+    }
+}
+
+static void test_dl11_receiver_latches_input_and_reading_rbuf_clears_done(void) {
+    pdp11_console_input(cpu, 'A');
+    TEST_ASSERT_TRUE(cpu->tti_csr & DL11_DONE);
+    const uint16_t prog[] = {0013700u, 0177562u}; // MOV @#177562 (RBUF), R0
+    deposit(001000, prog, 2);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16('A', cpu->r[PDP11_R0]);
+    TEST_ASSERT_FALSE(cpu->tti_csr & DL11_DONE); // reading RBUF clears DONE
+}
+
+static void test_dl11_receiver_interrupt_vectors_through_060(void) {
+    pdp11_mem_write_word(cpu->mem, 0000060u, 0003000u); // receiver vector -> handler
+    pdp11_mem_write_word(cpu->mem, 0000062u, 0000340u);
+    cpu->r[PDP11_SP] = 0004000u;
+    pdp11_console_write(cpu, DL11_RCSR, DL11_IE); // enable receiver interrupts
+    pdp11_console_input(cpu, 'Z');                // a character arrives -> BR4 int
+    const uint16_t prog[] = {0010000u};           // MOV R0,R0 (runs absent an int)
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0003000u, cpu->r[PDP11_PC]); // vectored to the handler
+}
+
+static void test_dl11_transmitter_emits_to_the_sink_then_completes(void) {
+    tx_len = 0;
+    pdp11_console_set_sink(cpu, tx_sink, NULL);
+    pdp11_console_write(cpu, DL11_XBUF, 'X'); // transmit a character
+    TEST_ASSERT_EQUAL_UINT(1u, tx_len);
+    TEST_ASSERT_EQUAL_HEX8('X', tx_capture[0]);
+    TEST_ASSERT_FALSE(cpu->tto_csr & DL11_DONE); // busy: DONE clear during transmit
+    cpu->time_ns = cpu->tto_done_ns;             // a character-time elapses
+    pdp11_console_tx_poll(cpu);
+    TEST_ASSERT_TRUE(cpu->tto_csr & DL11_DONE);  // ready again
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -720,5 +764,8 @@ int main(void) {
     RUN_TEST(test_kw11l_tick_with_interrupts_enabled_vectors_through_100);
     RUN_TEST(test_kw11l_tick_without_ie_sets_done_but_does_not_interrupt);
     RUN_TEST(test_kw11l_writing_zero_to_done_clears_the_monitor_bit);
+    RUN_TEST(test_dl11_receiver_latches_input_and_reading_rbuf_clears_done);
+    RUN_TEST(test_dl11_receiver_interrupt_vectors_through_060);
+    RUN_TEST(test_dl11_transmitter_emits_to_the_sink_then_completes);
     return UNITY_END();
 }

@@ -50,7 +50,8 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | FP11-C exception model (FEC/FEA, FPE trap) | **working** (P5c) | `fpe` probe (divide-by-zero → vector 0244) byte-identical to SimH; unit test |
 | Device interrupt controller (BR levels/vectors) | **working** (P6a) | unit tests; exercised by the KW11-L path |
 | KW11-L line clock | **working** (P6a) | `clk` register probe byte-identical to SimH; tick→interrupt unit tests |
-| Devices (DL11, RK, RP, TM/TU) | not started (P6b–e) | — |
+| DL11 console SLU | **working** (P6b) | `dl11` register probe byte-identical to SimH; input/output + interrupt unit tests |
+| Devices (RK, RP, TM/TU) | not started (P6c–e) | — |
 | Content boot (Unix V6/V7) | not started | — |
 | Interactive SDL frontend | not started | — |
 | Verified fast mode | not started | — |
