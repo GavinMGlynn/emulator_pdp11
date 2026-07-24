@@ -18,6 +18,8 @@ Status values: `open` · `confirmed` (matches oracle) · `fixed` · `divergence`
 | `eis` (P2c): MUL/DIV/ASH/ASHC/XOR over 14 flag-critical cases, PSW snapshotted after each via @#177776 | results + PSW all identical | SimH 11/70 identical | confirmed | Implemented directly from SimH case 007 (MUL carry, /0 → N=0 Z=V=C=1, /overflow → V=1, ASH/ASHC shift-out & overflow). Semantics matched first try. |
 | MFPS/MTPS on the 11/70 | first attempt implemented them as valid | SimH traps them (illegal) | **fixed** (removed) | The EIS probe used MFPS to snapshot the PSW; SimH 11/70 *trapped* (MFPS/MTPS are gated behind HAS_MXPS — LSI/34-class only, not the 11/70). Removed them; read the PSW via its memory-mapped address 0177776 instead. Re-enable per-model at P10. |
 
+| `faults` (P2b): odd-address word write (→vec 4) and MFPS illegal instruction (→vec 10), each handler RTIs back | R0=1 R2=1 R3=1, both handlers ran and resumed | SimH 11/70 identical | confirmed | Validates the setjmp/longjmp abort path, the odd-address and reserved-instruction vectors, and RTI resumption after a mid-instruction fault. |
+
 ## Timing (DEC paper oracle) — none yet
 Timing campaigns begin at P4. Each row will cite the KB11-C manual page/table it
 derives from, since SimH cannot verify cycle counts.

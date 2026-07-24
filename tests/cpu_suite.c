@@ -334,6 +334,28 @@ static void test_the_psw_is_readable_at_its_io_page_address(void) {
                             cpu->r[PDP11_R0]);
 }
 
+static void test_a_word_write_to_an_odd_address_traps_through_vector_4(void) {
+    cpu->r[PDP11_SP] = 0002000u;
+    pdp11_mem_write_word(cpu->mem, 0004u, 0001500u); // vec 4 -> handler
+    pdp11_mem_write_word(cpu->mem, 0006u, 0u);
+    // MOV R1, @#1001  (odd destination address)
+    const uint16_t prog[] = {0010137u, 0001001u};
+    deposit(001000, prog, 2);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0001500u, cpu->r[PDP11_PC]); // vectored to handler
+    TEST_ASSERT_EQUAL_HEX16(0001774u, cpu->r[PDP11_SP]); // frame pushed
+}
+
+static void test_an_11_70_illegal_instruction_traps_through_vector_10(void) {
+    cpu->r[PDP11_SP] = 0002000u;
+    pdp11_mem_write_word(cpu->mem, 0010u, 0001600u); // vec 10 -> handler
+    pdp11_mem_write_word(cpu->mem, 0012u, 0u);
+    const uint16_t prog[] = {0106700u}; // MFPS — illegal on the 11/70
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0001600u, cpu->r[PDP11_PC]);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -366,5 +388,7 @@ int main(void) {
     RUN_TEST(test_ash_shifts_left_and_records_the_last_bit_shifted_out);
     RUN_TEST(test_xor_toggles_bits_and_leaves_carry_alone);
     RUN_TEST(test_the_psw_is_readable_at_its_io_page_address);
+    RUN_TEST(test_a_word_write_to_an_odd_address_traps_through_vector_4);
+    RUN_TEST(test_an_11_70_illegal_instruction_traps_through_vector_10);
     return UNITY_END();
 }

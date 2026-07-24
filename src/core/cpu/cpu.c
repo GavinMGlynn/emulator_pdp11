@@ -9,6 +9,14 @@
 // ---------------------------------------------------------------------------
 #define ADDR_MASK 0177777u // 0xFFFF
 
+// Trap/interrupt vectors (kernel-mode only until the MMU adds modes at P3).
+#define VEC_BUS      0004u // odd address / bus error / stack limit / nxm
+#define VEC_RESERVED 0010u // reserved / illegal instruction
+#define VEC_BPT      0014u // BPT and the T-bit trace trap
+#define VEC_IOT      0020u // IOT
+#define VEC_EMT      0030u // EMT
+#define VEC_TRAP     0034u // TRAP
+
 pdp11_cpu *pdp11_cpu_create(void) {
     pdp11_cpu *cpu = calloc(1, sizeof *cpu);
     if (cpu == NULL) {
@@ -123,7 +131,17 @@ static uint32_t width_carry(bool bytemode) { return bytemode ? 0400u : 0200000u;
 // way. The address is the 16-bit alias of 17777776.
 #define IOPAGE_PSW 0177776u
 
-static uint16_t cpu_read_word(const pdp11_cpu *cpu, uint32_t addr) {
+// Raise a bus/odd-address (or, later, MMU) fault: record the vector and unwind
+// to the setjmp at the top of pdp11_cpu_step, aborting the instruction.
+static void cpu_bus_fault(pdp11_cpu *cpu, uint16_t vector) {
+    cpu->abort_vec = vector;
+    longjmp(cpu->abort_env, 1);
+}
+
+static uint16_t cpu_read_word(pdp11_cpu *cpu, uint32_t addr) {
+    if (addr & 1u) { // a word reference to an odd address traps through vector 4
+        cpu_bus_fault(cpu, VEC_BUS);
+    }
     if ((addr & 0177777u) == IOPAGE_PSW) {
         return cpu->psw;
     }
@@ -131,6 +149,9 @@ static uint16_t cpu_read_word(const pdp11_cpu *cpu, uint32_t addr) {
 }
 
 static void cpu_write_word(pdp11_cpu *cpu, uint32_t addr, uint16_t value) {
+    if (addr & 1u) {
+        cpu_bus_fault(cpu, VEC_BUS);
+    }
     if ((addr & 0177777u) == IOPAGE_PSW) {
         cpu->psw = value; // T-bit write rules land with the full I/O page
         return;
@@ -141,7 +162,7 @@ static void cpu_write_word(pdp11_cpu *cpu, uint32_t addr, uint16_t value) {
 // Read/write an operand at the natural width. A byte read yields 0..255; a byte
 // write to a register touches only the low byte (MOVB's sign-extension is the
 // one exception, handled in op_mov).
-static uint16_t read_operand(const pdp11_cpu *cpu, operand op, bool bytemode) {
+static uint16_t read_operand(pdp11_cpu *cpu, operand op, bool bytemode) {
     if (op.is_reg) {
         return bytemode ? (uint16_t)(cpu->r[op.reg] & 0377u) : cpu->r[op.reg];
     }
@@ -520,14 +541,6 @@ static void op_ccops(pdp11_cpu *cpu, uint16_t word) {
 }
 
 // --- Traps ------------------------------------------------------------------
-// Trap/interrupt vectors (kernel-mode only until the MMU adds modes at P3).
-#define VEC_BUS      0004u // odd address / bus error / stack limit / nxm
-#define VEC_RESERVED 0010u // reserved / illegal instruction
-#define VEC_BPT      0014u // BPT and the T-bit trace trap
-#define VEC_IOT      0020u // IOT
-#define VEC_EMT      0030u // EMT
-#define VEC_TRAP     0034u // TRAP
-
 // Enter a trap: push the old PSW then the old PC on the current stack, and load
 // the new PC/PSW from the vector. PC is pushed last so RTI/RTT pop it first.
 static void do_trap(pdp11_cpu *cpu, uint16_t vector) {
@@ -730,8 +743,15 @@ static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
         do_trap(cpu, VEC_IOT);  // IOT
     } else if (word == 0) {
         cpu->halted = true;     // HALT
+    } else if ((word & 0177700u) == 0106400u  // MTPS  (LSI-only)
+               || (word & 0177700u) == 0106700u  // MFPS  (LSI-only)
+               || (word & 0177000u) == 0075000u  // FIS   (not on 11/70)
+               || (word & 0177000u) == 0076000u) { // CIS  (not on 11/70)
+        do_trap(cpu, VEC_RESERVED); // illegal instruction on the 11/70
     }
-    // WAIT/RESET, EIS and FP11 remain no-ops until later P2/P5 increments.
+    // Still no-ops (legal on the 11/70, implemented later): WAIT/RESET/MFPT,
+    // MARK, MFPI/MTPI/MFPD/MTPD (P3), FP11 (P5). A full illegal-instruction
+    // net tightens as those land.
 }
 
 void pdp11_cpu_step(pdp11_cpu *cpu) {
@@ -749,6 +769,14 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
     // Arm a trace trap to fire after this instruction if T is set going in.
     if (cpu->psw & PDP11_PSW_T) {
         cpu->trace_pending = true;
+    }
+
+    // A bus/odd-address fault during the instruction longjmps back here and
+    // traps through the recorded vector.
+    if (setjmp(cpu->abort_env)) {
+        do_trap(cpu, cpu->abort_vec);
+        cpu->instr_count++;
+        return;
     }
 
     uint16_t word = fetch(cpu);

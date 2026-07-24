@@ -29,8 +29,8 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | Traps: BPT/IOT/EMT/TRAP/RTI/RTT + T-bit trace | **working** (P2a) | `trap`+`trace` probes byte-identical to SimH; unit tests |
 | EIS (MUL/DIV/ASH/ASHC/XOR) | **working** (P2c) | `eis` probe (14 cases, results+flags) byte-identical to SimH |
 | Memory-mapped PSW (0177776) | **working** | read/written the hardware way; `eis` probe + unit test |
-| Reserved-instruction / odd-address traps | not started (P2b) | — |
-| Interrupts (BR4-7 priority) / PIRQ | not started (P2d) | — |
+| Odd-address (bus) + reserved-instruction traps | **working** (P2b) | `faults` probe byte-identical to SimH; abort via setjmp/longjmp |
+| Interrupts (BR4-7 priority) / PIRQ / RESET/WAIT/MARK | not started (P2d) | — |
 | MMU (KT11, 22-bit, I/D) | not started | — |
 | Cache + Unibus/Massbus timing | not started | — (the cycle-accuracy core) |
 | FP11-C floating point | not started | — |

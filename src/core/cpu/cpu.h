@@ -1,6 +1,7 @@
 #ifndef PDP11_CPU_H
 #define PDP11_CPU_H
 
+#include <setjmp.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -30,6 +31,12 @@ typedef struct pdp11_cpu {
     uint16_t psw;  // processor status word
     bool halted;   // set by HALT until the next reset
     bool trace_pending; // a T-bit trace trap is due before the next instruction
+
+    // Mid-instruction fault handling. A bus/odd-address (later MMU) fault
+    // longjmps to abort_env, set up at the top of each instruction, and the
+    // step loop then traps through abort_vec.
+    jmp_buf abort_env;
+    uint16_t abort_vec;
 
     // Cycle accounting. The reference core will drive this from the KB11-C
     // timing model once cache/bus timing lands (COMPLETION_PLAN P4); until then

@@ -34,8 +34,11 @@ Verification legend: **[A]** = architectural diff vs SimH oracle;
 - [x] **P2a** Trap mechanism + BPT/IOT/EMT/TRAP vectors, RTI/RTT, T-bit trace
       (incl. the RTI-immediate vs RTT-deferred distinction). **[A]** `trap` +
       `trace` probes byte-identical to SimH.
-- [ ] **P2b** Reserved/illegal-instruction trap (vec 10) and odd-address / bus
-      trap (vec 4); stack-limit (vec 4 yellow/red).
+- [x] **P2b** Reserved/illegal-instruction trap (vec 10, 11/70 illegal opcodes)
+      and odd-address / bus trap (vec 4), via a setjmp/longjmp abort path (reused
+      for MMU aborts at P3). **[A]** `faults` probe byte-identical to SimH.
+      Stack-limit (yellow/red) and full illegal-opcode coverage tighten as FP/MMU
+      land.
 - [x] **P2c** EIS: MUL, DIV, ASH, ASHC, XOR. **[A]** `eis` probe (14 cases,
       results + flags via the memory-mapped PSW at 0177776) byte-identical to
       SimH. (MFPS/MTPS confirmed illegal on the 11/70 — deferred to per-model P10.)
