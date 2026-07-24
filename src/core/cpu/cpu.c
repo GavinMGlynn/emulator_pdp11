@@ -391,6 +391,129 @@ static bool try_single_op(pdp11_cpu *cpu, uint16_t word) {
     return false;
 }
 
+// --- Stack (R6) -------------------------------------------------------------
+static void push_word(pdp11_cpu *cpu, uint16_t value) {
+    cpu->r[PDP11_SP] = (uint16_t)(cpu->r[PDP11_SP] - 2u);
+    pdp11_mem_write_word(cpu->mem, cpu->r[PDP11_SP] & ADDR_MASK, value);
+}
+
+static uint16_t pop_word(pdp11_cpu *cpu) {
+    uint16_t value = pdp11_mem_read_word(cpu->mem, cpu->r[PDP11_SP] & ADDR_MASK);
+    cpu->r[PDP11_SP] = (uint16_t)(cpu->r[PDP11_SP] + 2u);
+    return value;
+}
+
+// --- Branches ---------------------------------------------------------------
+// A branch is identified by its high byte; the low byte is a signed word offset.
+static bool is_branch(uint16_t hb) {
+    return (hb >= 0001 && hb <= 0007) || (hb >= 0200 && hb <= 0207);
+}
+
+static bool branch_taken(const pdp11_cpu *cpu, uint16_t hb) {
+    bool n = flag_set(cpu, PDP11_PSW_N);
+    bool z = flag_set(cpu, PDP11_PSW_Z);
+    bool v = flag_set(cpu, PDP11_PSW_V);
+    bool c = flag_set(cpu, PDP11_PSW_C);
+    switch (hb) {
+    case 0001: return true;             // BR
+    case 0002: return !z;               // BNE
+    case 0003: return z;                // BEQ
+    case 0004: return (n ^ v) == 0;     // BGE
+    case 0005: return (n ^ v) != 0;     // BLT
+    case 0006: return !(z || (n ^ v));  // BGT
+    case 0007: return z || (n ^ v);     // BLE
+    case 0200: return !n;               // BPL
+    case 0201: return n;                // BMI
+    case 0202: return !c && !z;         // BHI
+    case 0203: return c || z;           // BLOS
+    case 0204: return !v;               // BVC
+    case 0205: return v;                // BVS
+    case 0206: return !c;               // BCC / BHIS
+    case 0207: return c;                // BCS / BLO
+    default:   return false;
+    }
+}
+
+static void op_branch(pdp11_cpu *cpu, uint16_t word, uint16_t hb) {
+    if (branch_taken(cpu, hb)) {
+        int offset = (int8_t)(word & 0377u); // sign-extend the byte
+        cpu->r[PDP11_PC] = (uint16_t)(cpu->r[PDP11_PC] + (uint16_t)(offset * 2));
+    }
+}
+
+// --- Control transfer -------------------------------------------------------
+// JMP dst: PC := effective address of dst (register mode is illegal — traps at
+// P2; ignored here). JSR/RTS use the same rule for the register-mode edge.
+static void op_jmp(pdp11_cpu *cpu, uint16_t word) {
+    operand dst = decode_operand(cpu, (uint8_t)(word & 077u), false);
+    if (!dst.is_reg) {
+        cpu->r[PDP11_PC] = (uint16_t)dst.addr;
+    }
+}
+
+static void op_jsr(pdp11_cpu *cpu, uint16_t word) {
+    uint8_t reg = (uint8_t)((word >> 6) & 07u);
+    operand dst = decode_operand(cpu, (uint8_t)(word & 077u), false);
+    if (dst.is_reg) {
+        return; // illegal addressing for JSR — P2 trap
+    }
+    push_word(cpu, cpu->r[reg]);
+    cpu->r[reg] = cpu->r[PDP11_PC];
+    cpu->r[PDP11_PC] = (uint16_t)dst.addr;
+}
+
+static void op_rts(pdp11_cpu *cpu, uint16_t word) {
+    uint8_t reg = (uint8_t)(word & 07u);
+    cpu->r[PDP11_PC] = cpu->r[reg];
+    cpu->r[reg] = pop_word(cpu);
+}
+
+// SOB reg,offset: decrement reg; if non-zero, branch back by offset words.
+static void op_sob(pdp11_cpu *cpu, uint16_t word) {
+    uint8_t reg = (uint8_t)((word >> 6) & 07u);
+    uint16_t offset = (uint16_t)(word & 077u);
+    cpu->r[reg] = (uint16_t)(cpu->r[reg] - 1u);
+    if (cpu->r[reg] != 0) {
+        cpu->r[PDP11_PC] = (uint16_t)(cpu->r[PDP11_PC] - offset * 2u);
+    }
+}
+
+// Condition-code operators (0002 40-77): bit 4 selects set vs clear, the low
+// nibble names the flags — which map directly onto the PSW's low four bits.
+static void op_ccops(pdp11_cpu *cpu, uint16_t word) {
+    uint16_t nibble = (uint16_t)(word & 017u);
+    if (word & 020u) {
+        cpu->psw |= nibble;
+    } else {
+        cpu->psw = (uint16_t)(cpu->psw & ~nibble);
+    }
+}
+
+// Decode the groups that aren't clean double-operand opcodes: single-operand
+// instructions, branches, JMP/JSR/RTS/SOB, condition-code ops, HALT.
+static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
+    if (try_single_op(cpu, word)) {
+        return;
+    }
+    uint16_t hb = (uint16_t)(word >> 8);
+    if (is_branch(hb)) {
+        op_branch(cpu, word, hb);
+    } else if (word >= 0000100 && word <= 0000177) {
+        op_jmp(cpu, word);
+    } else if (word >= 0000200 && word <= 0000207) {
+        op_rts(cpu, word);
+    } else if (word >= 0000240 && word <= 0000277) {
+        op_ccops(cpu, word);
+    } else if ((word & 0177000u) == 0004000) {
+        op_jsr(cpu, word);
+    } else if ((word & 0177000u) == 0077000) {
+        op_sob(cpu, word);
+    } else if (word == 0) {
+        cpu->halted = true; // HALT
+    }
+    // WAIT/RTI/RTT/EMT/TRAP/RESET, EIS and FP11 remain no-ops until P2/P5.
+}
+
 void pdp11_cpu_step(pdp11_cpu *cpu) {
     if (cpu->halted) {
         return;
@@ -412,19 +535,11 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
     case 014: op_bic(cpu, word, true);  break; // BICB
     case 015: op_bis(cpu, word, true);  break; // BISB
     case 016: op_sub(cpu, word);        break; // SUB
-    case 000:
-    case 007:
-    case 010:
-    case 017:
-        // Single-operand group, plus (later phases) branches, JMP/JSR/RTS,
-        // traps, EIS and FP11. For now handle the single-operand set; HALT is
-        // the one no-operand instruction we recognise.
-        if (!try_single_op(cpu, word)) {
-            if (word == 0) {
-                cpu->halted = true; // HALT
-            }
-            // Other unrecognised words are no-ops until P1b/P2/P5.
-        }
+    case 000: // single-op / branches / JMP / RTS / cc-ops / JSR / HALT
+    case 007: // SOB (+ EIS/FIS in P2/P5)
+    case 010: // branches / byte single-op / EMT / TRAP (P2)
+    case 017: // FP11 (P5)
+        decode_misc(cpu, word);
         break;
     default:
         break;

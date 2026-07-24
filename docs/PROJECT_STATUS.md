@@ -24,8 +24,8 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | Subsystem | Status | Verified by |
 |-----------|--------|-------------|
 | Build / CI / oracle harness | **working** (P0) | CTest green on debug+release; golden vs SimH |
-| CPU single/double-operand set | **working** (P1a) | 90-instr `alu` battery byte-identical to SimH; 18 unit tests |
-| CPU branches / JMP / JSR / RTS / SOB | not started (P1b) | — |
+| CPU single/double-operand set | **working** (P1a) | 90-instr `alu` battery byte-identical to SimH; unit tests |
+| CPU branches / JMP / JSR / RTS / SOB / cc-ops | **working** (P1b) | `flow` probe (loop+subroutine) byte-identical to SimH; unit tests |
 | EIS (MUL/DIV/ASH/ASHC) | not started (P2) | — |
 | Traps / interrupts / PIRQ | not started (P2) | — |
 | MMU (KT11, 22-bit, I/D) | not started | — |
@@ -45,8 +45,12 @@ No accuracy claim is made yet — only the subsystems below are verified.
   MOV/CMP/BIT/BIC/BIS/ADD/SUB and MOVB/CMPB/BITB/BICB/BISB; CLR/COM/INC/DEC/
   NEG/TST/ADC/SBC/ROR/ROL/ASR/ASL/SWAB/SXT and their byte forms — all condition
   codes verified byte-identical to SimH over the `alu` battery.
-- Still no-ops until later phases: branches, JMP/JSR/RTS/SOB (P1b); traps, EIS,
-  cc-ops, MARK/MTPS/MFP* (P2); FP11 (P5). MMU is P3 (runs unmapped, low 16-bit).
+- **All branches** (BR/BNE/BEQ/BGE/BLT/BGT/BLE/BPL/BMI/BHI/BLOS/BVC/BVS/BCC/BCS),
+  **JMP, JSR, RTS, SOB**, and the **condition-code operators** (SEx/CLx/NOP),
+  with stack (R6) push/pop for subroutine linkage.
+- Still no-ops until later phases: traps (BPT/IOT/EMT/TRAP/RTI/RTT), WAIT/RESET,
+  EIS, MARK/MTPS/MFP* (P2); FP11 (P5). MMU is P3 (runs unmapped, low 16-bit).
+  JMP/JSR to a register operand is illegal and currently ignored (P2 trap).
 
 ## Deliberate approximations (with reason & cost to close)
 | Approximation | Reason | Cost to close |

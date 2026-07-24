@@ -197,6 +197,60 @@ static void test_sxt_fills_the_destination_from_the_n_flag(void) {
     TEST_ASSERT_FALSE(cpu->psw & PDP11_PSW_Z);
 }
 
+static void test_beq_branches_backward_when_zero_is_set(void) {
+    // BEQ with offset -2 (0377 = -1 word => target = PC). Use Z set.
+    cpu->psw |= PDP11_PSW_Z;
+    const uint16_t prog[] = {0001776u}; // BEQ .-2  (offset 0376 = -2 words)
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    // PC after fetch is 001002; offset -2 words => 001002 - 4 = 000776.
+    TEST_ASSERT_EQUAL_HEX16(0000776u, cpu->r[PDP11_PC]);
+}
+
+static void test_bne_is_not_taken_when_zero_is_set(void) {
+    cpu->psw |= PDP11_PSW_Z;
+    const uint16_t prog[] = {0001000u}; // BNE .+2 area; Z set => not taken
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0001002u, cpu->r[PDP11_PC]); // fell through
+}
+
+static void test_sob_decrements_and_loops_until_the_register_is_zero(void) {
+    cpu->r[PDP11_R0] = 3;
+    // SOB R0,.  targeting itself: offset 1 => PC back to the SOB word.
+    const uint16_t prog[] = {0077001u}; // SOB R0, .-2
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu); // 3 -> 2, loop
+    TEST_ASSERT_EQUAL_HEX16(2u, cpu->r[PDP11_R0]);
+    TEST_ASSERT_EQUAL_HEX16(0001000u, cpu->r[PDP11_PC]);
+}
+
+static void test_jsr_pushes_the_register_and_saves_the_return_address(void) {
+    cpu->r[PDP11_SP] = 0002000u;
+    cpu->r[PDP11_R5] = 0123456u;
+    // JSR R5, @#001020 : reg=5, dst mode 3 reg 7 (absolute) = 037
+    const uint16_t prog[] = {0004537u, 0001020u}; // JSR R5, @#1020
+    deposit(001000, prog, 2);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0001020u, cpu->r[PDP11_PC]);   // jumped
+    TEST_ASSERT_EQUAL_HEX16(0001004u, cpu->r[PDP11_R5]);   // R5 = old PC
+    TEST_ASSERT_EQUAL_HEX16(0001776u, cpu->r[PDP11_SP]);   // pushed one word
+    TEST_ASSERT_EQUAL_HEX16(0123456u,
+                            pdp11_mem_read_word(cpu->mem, 0001776u)); // old R5
+}
+
+static void test_sec_sets_and_clc_clears_the_carry_flag(void) {
+    const uint16_t sec[] = {0000261u}; // SEC
+    deposit(001000, sec, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_TRUE(cpu->psw & PDP11_PSW_C);
+    cpu->r[PDP11_PC] = 001000;
+    const uint16_t clc[] = {0000241u}; // CLC
+    deposit(001000, clc, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_FALSE(cpu->psw & PDP11_PSW_C);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -217,5 +271,10 @@ int main(void) {
     RUN_TEST(test_ror_rotates_bit0_into_carry_and_carry_into_bit15);
     RUN_TEST(test_swab_swaps_the_two_bytes_of_a_word);
     RUN_TEST(test_sxt_fills_the_destination_from_the_n_flag);
+    RUN_TEST(test_beq_branches_backward_when_zero_is_set);
+    RUN_TEST(test_bne_is_not_taken_when_zero_is_set);
+    RUN_TEST(test_sob_decrements_and_loops_until_the_register_is_zero);
+    RUN_TEST(test_jsr_pushes_the_register_and_saves_the_return_address);
+    RUN_TEST(test_sec_sets_and_clc_clears_the_carry_flag);
     return UNITY_END();
 }

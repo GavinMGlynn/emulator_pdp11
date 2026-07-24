@@ -22,8 +22,10 @@ Verification legend: **[A]** = architectural diff vs SimH oracle;
       ROR/ROL/ASR/ASL/SWAB/ADC/SBC/SXT; MOV/CMP/BIT/BIC/BIS/ADD/SUB; byte
       variants) incl. the byte-to-register sign-extension quirk. **[A]** `alu`
       battery byte-identical to SimH + 18 unit tests.
-- [ ] **P1b** Branches (BR/BNE/BEQ/BPL/BMI/BCS/BCC/BVS/BVC/BGE/BLT/BGT/BLE/BHI/
-      BLOS/…), JMP, JSR/RTS, SOB, condition-code ops (SEx/CLx).
+- [x] **P1b** Branches (BR/BNE/BEQ/BPL/BMI/BCS/BCC/BVS/BVC/BGE/BLT/BGT/BLE/BHI/
+      BLOS), JMP, JSR/RTS, SOB, condition-code ops (SEx/CLx). **[A]** `flow`
+      probe (SOB loop + JSR/RTS subroutine + branches) byte-identical to SimH,
+      plus a two-pass probe assembler (`tools/probes/asm.py`).
 - [ ] **P1c** Odd-address & reserved-mode handling (needs the P2 trap mechanism).
 - *Verify:* instruction-matrix probes **[A]**. Per-instruction cycle goldens
   **[T]** are deferred to P4 (they need the `tick()`/cache timing model).
