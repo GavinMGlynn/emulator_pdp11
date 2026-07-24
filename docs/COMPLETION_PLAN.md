@@ -123,8 +123,11 @@ recovery) and stack-limit yellow/red.
       64-bit FAC packing (word0<<48..word3), FP-sized autoincrement addressing,
       and the FP condition codes (N=sign, Z=exp 0). **[A]** `fpls` probe (load
       1.0, store, negate, store -1.0) byte-identical to SimH.
-- [ ] **P5c** Arithmetic: ADD/SUB/MUL/DIV/CMP/MOD, conversions (LDC*/STC*),
-      LDEXP/STEXP, rounding & the FP exception model (FEC/FEA, traps).
+- [~] **P5c** Arithmetic. ADDF/ADDD and SUBF/SUBD done via a bit-exact port of
+      SimH's addfp11/round_and_pack (src/core/fp) — the guard-bit/rounding
+      machinery all subsequent ops reuse. **[A]** `fpadd` probe byte-identical to
+      SimH. Remaining: MUL/DIV/CMP/MOD, conversions (LDC*/STC*, LDEXP/STEXP), and
+      the FEC/FEA + FPE-trap exception model.
 - *Verify:* FP arithmetic probes **[A]**; FP timing **[T]**.
 
 ## P6 — Devices for the Unix boot

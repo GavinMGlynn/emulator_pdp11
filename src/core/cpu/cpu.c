@@ -2,6 +2,7 @@
 
 #include <stdlib.h>
 
+#include "fp/fp.h"
 #include "timing/timing.h"
 
 // ---------------------------------------------------------------------------
@@ -1135,6 +1136,7 @@ static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
 #define FPS_CC 0000017u // condition codes (N Z V C), same positions as the PSW
 #define FPS_N  0000010u
 #define FPS_Z  0000004u
+#define FPS_V  0000002u
 #define FPS_D  0000200u // 0 = single, 1 = double
 #define FPS_L  0000100u // 0 = short integer, 1 = long
 #define FPS_RW 0147757u // writable FPS bits (SimH FPS_RW)
@@ -1307,8 +1309,29 @@ static void op_fp11(pdp11_cpu *cpu, uint16_t word) {
         break;
     }
 
+    case 004:   // ADDf
+    case 006: { // SUBf
+        int ac = (word >> 6) & 03;
+        fp_op o = decode_fp(cpu, spec, len);
+        uint64_t fsrc = read_fp(cpu, o, len);
+        // SUB negates the source (unless it is zero) then adds.
+        if (major == 006 && fp_exp(fsrc) != 0) {
+            fsrc ^= FP_SIGNBIT;
+        }
+        int vflag = 0, fec = 0;
+        uint64_t r = pdp11_fp_add(cpu->fac[ac], fsrc, cpu->fps, &vflag, &fec);
+        cpu->fac[ac] = r;
+        cpu->fps = fp_setcc(cpu->fps, r, (uint16_t)(vflag ? FPS_V : 0));
+        if (fec) {
+            cpu->fec = (uint16_t)fec;
+            cpu->fea = (uint16_t)(cpu->r[PDP11_PC] - 2u); // FP instruction addr
+            cpu->fps |= 0100000u; // FPS_ER
+        }
+        break;
+    }
+
     default:
-        break; // arithmetic / conversions — P5c
+        break; // MUL/DIV/CMP/MOD, conversions — later P5c increments
     }
 }
 

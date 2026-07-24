@@ -560,6 +560,18 @@ static void test_negf_flips_the_sign_of_an_accumulator(void) {
     TEST_ASSERT_TRUE(cpu->fps & 0000010u); // FP N set
 }
 
+static void test_addf_adds_two_single_floats(void) {
+    // AC0 = 1.0 ; ADDF @#2000 (1.0) -> 2.0 (exp 130 -> high word 040400)
+    cpu->fac[0] = 0x4080000000000000ULL; // 1.0
+    pdp11_mem_write_word(cpu->mem, 0002000u, 0040200u); // 1.0
+    pdp11_mem_write_word(cpu->mem, 0002002u, 0u);
+    const uint16_t prog[] = {0172037u, 0002000u}; // ADDF @#2000, AC0
+    deposit(001000, prog, 2);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0040400u, (uint16_t)(cpu->fac[0] >> 48)); // 2.0
+    TEST_ASSERT_FALSE(cpu->fps & 0000004u); // FP Z clear (nonzero)
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -609,5 +621,6 @@ int main(void) {
     RUN_TEST(test_setd_and_setf_toggle_the_fps_double_bit);
     RUN_TEST(test_ldf_stf_round_trip_a_single_through_an_accumulator);
     RUN_TEST(test_negf_flips_the_sign_of_an_accumulator);
+    RUN_TEST(test_addf_adds_two_single_floats);
     return UNITY_END();
 }

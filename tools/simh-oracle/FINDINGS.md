@@ -36,6 +36,8 @@ Status values: `open` · `confirmed` (matches oracle) · `fixed` · `divergence`
 
 | `fpls` (P5b): LDF 1.0 into AC0, STF back, NEGF, STF -1.0 | mem[4010]=040200/0, mem[4014]=0140200/0 | SimH 11/70 identical | confirmed | Validates the 64-bit FAC packing (word0<<48..word3), LDF/STF, and NEGF sign flip. |
 
+| `fpadd` (P5c): ADDF 1.0+1.0=2.0, SUBF 2.0-1.0=1.0 (single) | mem[4020]=040400, mem[4024]=040200 | SimH 11/70 identical | confirmed | src/core/fp is a faithful port of SimH addfp11/round_and_pack (guard bits, rounding); results match bit-for-bit. |
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|
