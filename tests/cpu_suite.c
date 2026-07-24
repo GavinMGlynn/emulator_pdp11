@@ -395,6 +395,26 @@ static void test_a_word_write_to_an_odd_address_traps_through_vector_4(void) {
     TEST_ASSERT_EQUAL_HEX16(0001774u, cpu->r[PDP11_SP]); // frame pushed
 }
 
+// A reference whose relocated physical address is at or above installed memory
+// (and below the I/O page) is non-existent memory: the 11/70 aborts it through
+// vector 4, exactly as SimH does (pdp11_cpu.c ReadW: pa >= MEMSIZE && pa <
+// IOPAGEBASE). Unix sizes core by walking it until this trap fires; without it
+// the memory-sizing loop never terminates. mem_top is shrunk so a reachable
+// 16-bit address (MMU off) lands in the non-existent region.
+static void test_a_word_access_to_nonexistent_memory_traps_through_vector_4(void) {
+    cpu->r[PDP11_SP] = 0002000u;
+    cpu->mem_top = 0100000u;                          // 32 KB installed RAM
+    pdp11_mem_write_word(cpu->mem, 0004u, 0001500u);  // vec 4 -> handler
+    pdp11_mem_write_word(cpu->mem, 0006u, 0u);
+    // MOV @#140000, R0 — absolute 140000 is above installed RAM, below the I/O
+    // page, so the operand read is non-existent memory.
+    const uint16_t prog[] = {0013700u, 0140000u};
+    deposit(001000, prog, 2);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0001500u, cpu->r[PDP11_PC]); // vectored to the handler
+    TEST_ASSERT_EQUAL_HEX16(0001774u, cpu->r[PDP11_SP]); // trap frame pushed
+}
+
 static void test_an_11_70_illegal_instruction_traps_through_vector_10(void) {
     cpu->r[PDP11_SP] = 0002000u;
     pdp11_mem_write_word(cpu->mem, 0010u, 0001600u); // vec 10 -> handler
@@ -813,6 +833,29 @@ static void test_rk11_completion_interrupts_through_220_when_enabled(void) {
     TEST_ASSERT_EQUAL_HEX16(0003000u, cpu->r[PDP11_PC]); // vectored to the handler
 }
 
+// Granting a device interrupt acknowledges the bus request and drops it, so a
+// still-asserted level (DONE & IE both set, handler yet to clear DONE) is taken
+// exactly once — it does not re-vector on the next instruction. The vector PSW
+// here keeps priority 0 so only the acknowledge, not priority masking, can stop
+// a re-storm. Regression for the RK interrupt storm that stalled the V6 boot.
+static void test_a_granted_device_interrupt_is_acknowledged_and_not_restormed(void) {
+    pdp11_mem_write_word(cpu->mem, 0000220u, 0003000u); // RK vector -> handler
+    pdp11_mem_write_word(cpu->mem, 0000222u, 0000000u); // vector PSW: priority 0
+    pdp11_mem_write_word(cpu->mem, 0003000u, 0000240u); // handler instruction: NOP
+    cpu->r[PDP11_SP] = 0004000u;
+    pdp11_rk_attach(cpu, rk_disk, 1024);
+    pdp11_rk_write(cpu, RK_RKBA, 0010000u);
+    pdp11_rk_write(cpu, RK_RKDA, 0);
+    pdp11_rk_write(cpu, RK_RKWC, rk_wc(256));
+    pdp11_rk_write(cpu, RK_RKCS, (2u << 1) | 1u | 0000100u); // READ, GO, IE
+    cpu->time_ns = cpu->rk.done_ns;
+    pdp11_rk_poll(cpu);                                  // completes -> BR5 request
+    pdp11_cpu_step(cpu);                                 // grant + acknowledge
+    TEST_ASSERT_EQUAL_HEX16(0003000u, cpu->r[PDP11_PC]); // vectored once
+    pdp11_cpu_step(cpu);                                 // handler NOP, no re-storm
+    TEST_ASSERT_EQUAL_HEX16(0003002u, cpu->r[PDP11_PC]); // ran on, did not re-vector
+}
+
 static uint16_t rp_disk[1024];
 
 static void test_rp04_read_transfers_a_sector_from_disk_to_memory(void) {
@@ -982,6 +1025,7 @@ int main(void) {
     RUN_TEST(test_xor_toggles_bits_and_leaves_carry_alone);
     RUN_TEST(test_the_psw_is_readable_at_its_io_page_address);
     RUN_TEST(test_a_word_write_to_an_odd_address_traps_through_vector_4);
+    RUN_TEST(test_a_word_access_to_nonexistent_memory_traps_through_vector_4);
     RUN_TEST(test_an_11_70_illegal_instruction_traps_through_vector_10);
     RUN_TEST(test_a_pirq_above_the_cpu_priority_is_granted_through_240);
     RUN_TEST(test_a_pirq_at_or_below_the_cpu_priority_is_masked);
@@ -1013,6 +1057,7 @@ int main(void) {
     RUN_TEST(test_rk11_read_transfers_a_sector_from_disk_to_memory);
     RUN_TEST(test_rk11_write_transfers_memory_to_disk);
     RUN_TEST(test_rk11_completion_interrupts_through_220_when_enabled);
+    RUN_TEST(test_a_granted_device_interrupt_is_acknowledged_and_not_restormed);
     RUN_TEST(test_rp04_read_transfers_a_sector_from_disk_to_memory);
     RUN_TEST(test_rp04_write_transfers_memory_to_disk);
     RUN_TEST(test_rp04_completion_interrupts_through_254_when_enabled);

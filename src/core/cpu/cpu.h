@@ -112,6 +112,14 @@ typedef struct pdp11_cpu {
     pdp11_cache cache;
 
     pdp11_mem *mem;
+
+    // Installed main-memory size in bytes. The backing store is the full 22-bit
+    // space, but a relocated physical reference at or above this (and below the
+    // I/O page) is non-existent memory: it aborts through vector 4, exactly as
+    // SimH does when the relocated PA is >= MEMSIZE and < IOPAGEBASE
+    // (pdp11_cpu.c ReadW/WriteW). Unix sizes core by walking it until this NXM
+    // trap fires, so the value must match the oracle's `set cpu <n>k`.
+    uint32_t mem_top;
 } pdp11_cpu;
 
 // Allocate a CPU with its own 4 MiB physical memory (heap — the memory array is

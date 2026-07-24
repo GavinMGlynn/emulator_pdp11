@@ -91,6 +91,39 @@ missed it — it always overwrites the PSW with the *next* instruction's codes.)
 With the fix the first 65000 kernel instructions now match SimH in PC+SP+PSW; the
 boot divergence advanced again.
 
+**P7c bug #4 — non-existent memory does not abort (2026-07-25).** After the PSW
+fix the boot hung in a loop (022046-052, an `MTPD` clear) whose surrounding code
+ran ~15000 times with a single register (R4) climbing without bound and every
+other register constant — the signature of a *probe*, not a busy-wait. It is V6
+`main()`'s memory-sizing loop: it maps a page to successive 22-bit frames and
+reads each, sizing core by the address at which the reference **aborts through
+vector 4** (non-existent memory). SimH does this in `ReadW`/`WriteW`: after
+relocation, `pa >= MEMSIZE && pa < IOPAGEBASE` sets CPUERR and `ABORT (TRAP_NXM)`
+(`pdp11_cpu.c`); `256K` = 262144 = 2^18, `IOPAGEBASE` = 017760000. Our memory was
+a flat 4 MB array that answered every address, so the probe never terminated.
+Added a create-time `mem_top` (256 KB, matching the oracle's `set cpu 256k`) and
+an NXM check on every relocated physical reference that is not the I/O page.
+Unit-tested (`test_a_word_access_to_nonexistent_memory_traps_through_vector_4`).
+The 22-bit path is what matters: in 18-bit mode every address is RAM or I/O, so
+(as in SimH) only 22-bit relocation reaches the NXM region the probe needs.
+
+**P7c bug #5 — device interrupt not acknowledged, re-storms (2026-07-25).** With
+core sized, the boot did real filesystem I/O then hung in a priority-5 idle/`swtch`
+loop. Interrupt logging showed vector 0220 (RK) granted **89533 times**: the RK
+read completed and asserted BR5, but granting it never dropped the request. On the
+Unibus the BG/acknowledge cycle clears the request latch, so a level that stays
+asserted (DONE & IE both set until the ISR clears DONE) is taken *once*. SimH does
+this in `get_vector` (`pdp11_io.c`): `int_req[i] &= ~(1u << j)` on the acknowledged
+device. Our grant path (`do_trap` on `int_tab[dev].vec`) omitted the clear, so the
+still-DONE RK re-interrupted every instruction and the woken process never ran.
+Fixed by clearing the granted device's `int_req` bit on acknowledge (PIR is
+unaffected — it persists until software writes PIRQ). Unit-tested
+(`test_a_granted_device_interrupt_is_acknowledged_and_not_restormed`). The boot now
+sizes memory, mounts root, reads inodes and `/etc/init`, and writes the superblock
+— then hits the **next** divergence: a wild transfer to PC 0 that settles into a
+`br .` spin at 000426 (kernel jumped to zero after a user-space copy loop). That
+deeper crash is the next P7c target.
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|

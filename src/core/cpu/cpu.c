@@ -39,6 +39,11 @@ pdp11_cpu *pdp11_cpu_create(void) {
         return NULL;
     }
     pdp11_cpu_reset(cpu);
+    // Installed memory: 256 KB (= 2**18), matching the oracle default
+    // `set cpu 256k`. A relocated physical reference at or above this and below
+    // the I/O page is non-existent memory and aborts through vector 4. It is a
+    // create-time configuration, so reset (runtime state only) leaves it alone.
+    cpu->mem_top = 01000000u;
     return cpu;
 }
 
@@ -394,6 +399,16 @@ static uint32_t mmu_relocate(pdp11_cpu *cpu, uint16_t va, bool is_write,
 
 static bool is_iopage(uint32_t pa) { return pa >= IOPAGE_TOP; }
 
+// Non-existent memory: a relocated physical reference at or above installed
+// memory (and below the I/O page, which is dispatched separately) aborts
+// through vector 4, as SimH does (pdp11_cpu.c ReadW/WriteW: pa >= MEMSIZE &&
+// pa < IOPAGEBASE). Unix sizes core by walking it until this trap fires.
+static void check_nxm(pdp11_cpu *cpu, uint32_t pa) {
+    if (pa >= cpu->mem_top) {
+        cpu_bus_fault(cpu, VEC_BUS);
+    }
+}
+
 // Map an I/O-page register address (pa & 0177777, i.e. 0160000-0177777) to its
 // PAR/PDR slot, or return -1. The 12 blocks of 8 cover Kernel/Super/User × I/D.
 static int apr_index(uint16_t a, bool *is_par) {
@@ -495,6 +510,7 @@ static uint16_t cpu_read_word_gen(pdp11_cpu *cpu, uint32_t va, int mode,
     if (is_iopage(pa)) {
         return io_read(cpu, (uint16_t)(pa & 0177777u)); // I/O page bypasses cache
     }
+    check_nxm(cpu, pa);
     pdp11_cache_read(&cpu->cache, pa); // read-miss counting for timing
     return pdp11_mem_read_word(cpu->mem, pa);
 }
@@ -508,6 +524,7 @@ static void cpu_write_word_mode(pdp11_cpu *cpu, uint32_t va, int mode,
     if (is_iopage(pa)) {
         io_write(cpu, (uint16_t)(pa & 0177777u), value);
     } else {
+        check_nxm(cpu, pa);
         pdp11_mem_write_word(cpu->mem, pa, value);
     }
 }
@@ -536,6 +553,7 @@ static uint8_t cpu_read_byte(pdp11_cpu *cpu, uint32_t va) {
         uint16_t w = io_read(cpu, (uint16_t)(pa & 0177776u));
         return (uint8_t)((pa & 1u) ? (w >> 8) : (w & 0377u));
     }
+    check_nxm(cpu, pa);
     pdp11_cache_read(&cpu->cache, pa); // read-miss counting for timing
     return pdp11_mem_read_byte(cpu->mem, pa);
 }
@@ -549,6 +567,7 @@ static void cpu_write_byte(pdp11_cpu *cpu, uint32_t va, uint8_t value) {
                       : (uint16_t)((w & 0177400u) | value);
         io_write(cpu, reg, w);
     } else {
+        check_nxm(cpu, pa);
         pdp11_mem_write_byte(cpu->mem, pa, value);
     }
 }
@@ -1717,6 +1736,14 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
         int dev = highest_int(cpu, &devipl);
         if (dev >= 0 && devipl > ipl && devipl >= pir) {
             cpu->waiting = false; // an interrupt ends the wait state
+            // Acknowledging the grant drops the device's bus request: the
+            // Unibus BG cycle clears the request latch, so a level that stays
+            // asserted (DONE & IE both still set) does not re-interrupt until
+            // the device raises a fresh edge. Mirrors SimH get_vector, which
+            // clears int_req for the acknowledged device (pdp11_io.c). Without
+            // this a still-DONE device (e.g. RK after a completed read) storms
+            // the same vector every instruction.
+            cpu->int_req &= (uint16_t)~(1u << dev);
             do_trap(cpu, int_tab[dev].vec);
             cpu->instr_count++;
             return;

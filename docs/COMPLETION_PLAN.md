@@ -214,13 +214,15 @@ real-output check) are exercised there.
     SimH and our headless with the transferred memory diffed — awaits the oracle
     disk-attach harness; today the DMA is unit-tested and will be exercised end to
     end by the XXDP RK diagnostic **[C]** at P7.
-  - *Documented tail (interrupt model):* our interrupt grant dispatches and ends
-    the step, re-checking interrupts before the handler's first instruction runs.
-    With a normal handler (whose vector PSW raises priority to the device level or
-    above) this is indistinguishable; only a pathological handler at priority 0
-    with the source still asserted storms where SimH would execute one handler
-    instruction first. Frontend TTY capture (wiring the console sink to stdout for
-    a boot-stream diff) lands with P7.
+  - *Interrupt model:* our interrupt grant dispatches and ends the step,
+    re-checking interrupts before the handler's first instruction runs. Granting
+    a device interrupt now **acknowledges and clears** that device's request bit
+    (the Unibus BG cycle drops the request latch), matching SimH `get_vector`, so
+    a level that stays asserted (DONE & IE both set until the ISR clears DONE) is
+    taken exactly once instead of storming — the RK re-storm that stalled the V6
+    boot (P7c bug #5). PIR is unaffected (it persists until software writes PIRQ).
+    Frontend TTY capture (console sink to stdout for a boot-stream diff) lands
+    with P7.
 
 ## P7 — Content boot (thermometer, not a goal)
 - [~] **P7a** Reference boot established. The bootable image is `unix0_v6_rk.dsk`
@@ -275,7 +277,25 @@ real-output check) are exercised there.
     written Z bit; an explicit PSW store's codes must win (11/70/SimH). Fixed via a
     per-instruction `cc_frozen` flag (a PSW write through 0177776 suppresses the
     instruction's own CC update); unit-tested. First 65000 kernel instructions now
-    match SimH in PC+SP+PSW; the divergence advanced further — hunt continues.
+    match SimH in PC+SP+PSW; the divergence advanced further.
+  - **Bug #4 found + fixed — non-existent memory did not abort.** The boot hung in
+    V6 `main()`'s memory-sizing probe (an `MTPD` clear loop with one register
+    climbing unbounded): it maps a page to successive 22-bit frames and sizes core
+    by where a reference **aborts through vector 4**. Our flat 4 MB array answered
+    every address, so the probe never ended. Added a create-time `mem_top` (256 KB,
+    matching the oracle `set cpu 256k`) and an NXM abort on any relocated physical
+    reference `>= mem_top` that is not the I/O page — matching SimH `ReadW`/`WriteW`
+    (`pa >= MEMSIZE && pa < IOPAGEBASE`). Unit-tested. Boot advanced past sizing.
+  - **Bug #5 found + fixed — device interrupt not acknowledged (re-storm).** With
+    core sized, the boot did real filesystem I/O then idled while the RK interrupt
+    (vector 0220) was granted 89533×: granting never dropped the request, so the
+    still-asserted DONE&IE level re-fired every instruction and the woken process
+    never ran. Acknowledge now clears the granted device's `int_req` bit (Unibus BG
+    drops the request latch), matching SimH `get_vector`; PIR still persists.
+    Unit-tested. **Boot now sizes memory, mounts root, reads inodes + `/etc/init`,
+    and writes the superblock** — then diverges at a wild jump to PC 0 settling into
+    a `br .` spin at 000426 (kernel jumped to zero after a user copy loop). That
+    deeper crash is the next P7c target.
 - *Verify:* console TTY stream diffed vs SimH booting the same image **[A]/[C]**.
 
 ## P8 — Interactive SDL3 frontend
