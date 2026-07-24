@@ -1192,6 +1192,18 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
         break;
     }
 
-    cpu->time_ns += pdp11_instr_timing(word).ns;
+    // KB11-C timing. Branches and SOB depend on whether the branch was taken —
+    // condition codes are unchanged by a branch, so re-evaluating gives the same
+    // result, and SOB's counter holds its post-decrement value.
+    uint16_t hb = (uint16_t)(word >> 8);
+    uint32_t ns;
+    if (is_branch(hb)) {
+        ns = branch_taken(cpu, hb) ? 600u : 300u; // taken .60 / not .30
+    } else if ((word & 0177000u) == 0077000u) {   // SOB: taken .60 / not .75
+        ns = (cpu->r[(word >> 6) & 07u] != 0) ? 600u : 750u;
+    } else {
+        ns = pdp11_instr_timing(word).ns;
+    }
+    cpu->time_ns += ns;
     cpu->instr_count++;
 }

@@ -51,9 +51,48 @@ static void test_tst_reg_is_300ns(void) {
     TEST_ASSERT_EQUAL_UINT32(300, pdp11_instr_timing(0005700u).ns); // TST R0
 }
 
+// CLR R7 gets note (J): +0.30 us when the destination is R7.
+static void test_clr_pc_gets_the_r7_penalty_900ns(void) {
+    TEST_ASSERT_EQUAL_UINT32(600, pdp11_instr_timing(0005007u).ns); // CLR R7
+}
+
+// JMP / JSR times are by DST mode (C-5).
+static void test_jmp_deferred_is_900ns(void) {
+    TEST_ASSERT_EQUAL_UINT32(900, pdp11_instr_timing(0000110u).ns); // JMP (R0)
+}
+
+static void test_jsr_deferred_is_1950ns(void) {
+    TEST_ASSERT_EQUAL_UINT32(1950, pdp11_instr_timing(0004710u).ns); // JSR PC,(R0)
+}
+
+// MFPI = SRC time + 1.50; MTPI = instruction time by DST mode.
+static void test_mfpi_register_is_1500ns(void) {
+    TEST_ASSERT_EQUAL_UINT32(1500, pdp11_instr_timing(0006500u).ns); // MFPI R0
+}
+
+static void test_mtpi_deferred_is_1650ns(void) {
+    TEST_ASSERT_EQUAL_UINT32(1650, pdp11_instr_timing(0006610u).ns); // MTPI (R0)
+}
+
+// MUL = SRC time + 3.30 us; XOR = DST time + EF.
+static void test_mul_register_is_3300ns(void) {
+    TEST_ASSERT_EQUAL_UINT32(3300, pdp11_instr_timing(0070002u).ns); // MUL R2,R0
+}
+
+static void test_xor_reg_reg_is_300ns(void) {
+    TEST_ASSERT_EQUAL_UINT32(300, pdp11_instr_timing(0074001u).ns); // XOR R0,R1
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_add_reg_reg_is_300ns);
+    RUN_TEST(test_clr_pc_gets_the_r7_penalty_900ns);
+    RUN_TEST(test_jmp_deferred_is_900ns);
+    RUN_TEST(test_jsr_deferred_is_1950ns);
+    RUN_TEST(test_mfpi_register_is_1500ns);
+    RUN_TEST(test_mtpi_deferred_is_1650ns);
+    RUN_TEST(test_mul_register_is_3300ns);
+    RUN_TEST(test_xor_reg_reg_is_300ns);
     RUN_TEST(test_add_mode6_mode6_is_2400ns_per_the_tables);
     RUN_TEST(test_mov_reg_reg_is_300ns);
     RUN_TEST(test_mov_to_pc_is_600ns);

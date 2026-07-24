@@ -35,4 +35,5 @@ Status values: `open` · `confirmed` (matches oracle) · `fixed` · `divergence`
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|
+| P4b branch/jump/EIS timing: branches .60/.30, JMP/JSR by mode, MTPI/MTPD, MFPI/MFPD +1.50, MUL 3.30, XOR, note (J) | JMP (R0)=900ns; MUL=3300ns; BEQ taken=600/not=300 | Handbook App. C.1.7 / C-4 / C-5 (PDF pp. 272-273) | confirmed vs tables | Branch/SOB timing computed at execution (flags unchanged by a branch); DIV/ASH/ASHC operand-dependent times are a tail. |
 | P4a instruction timing: SRC/DST address time + Execute/Fetch time | ADD R/R=300ns; CLR (R0)=1500ns; MOV to PC=600ns; etc. | PDP-11/70 Handbook 1977-78, App. C.1.5-C.1.7 (PDF pp. 269-271) | confirmed vs tables | Times in ns (handbook us x1000). **Manual self-inconsistency found:** the ADD mode-6/6 *worked example* (C.1.3) totals 2.55 us (EF 1.35), but the *tables* give SRC .60 + DST .60 + EF 1.20 = 2.40 us. We implement the tables and treat the example as an errata. |

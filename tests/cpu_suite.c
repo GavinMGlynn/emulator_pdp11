@@ -497,6 +497,23 @@ static void test_data_references_use_d_space_when_it_is_enabled(void) {
     TEST_ASSERT_EQUAL_HEX16(0122222u, cpu->r[PDP11_R0]); // read via D-space
 }
 
+static void test_branch_timing_is_600ns_taken_and_300ns_not_taken(void) {
+    cpu->psw |= PDP11_PSW_Z;             // Z set
+    const uint16_t taken[] = {0001400u}; // BEQ .  (taken)
+    deposit(001000, taken, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_UINT64(600, cpu->time_ns);
+
+    pdp11_cpu_destroy(cpu);
+    cpu = pdp11_cpu_create();
+    cpu->r[PDP11_PC] = 001000;
+    cpu->psw |= PDP11_PSW_Z;
+    const uint16_t nottaken[] = {0001000u}; // BNE (Z set -> not taken)
+    deposit(001000, nottaken, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_UINT64(300, cpu->time_ns);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -541,5 +558,6 @@ int main(void) {
     RUN_TEST(test_r0_r5_are_banked_by_the_psw_register_set_bit);
     RUN_TEST(test_mfpi_reads_the_previous_modes_space_and_pushes_it);
     RUN_TEST(test_data_references_use_d_space_when_it_is_enabled);
+    RUN_TEST(test_branch_timing_is_600ns_taken_and_300ns_not_taken);
     return UNITY_END();
 }

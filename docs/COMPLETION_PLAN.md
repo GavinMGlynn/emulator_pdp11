@@ -91,8 +91,11 @@ recovery) and stack-limit yellow/red.
       mode + Execute/Fetch time per instruction class, in ns, from the PDP-11/70
       Handbook App. C tables; a per-instruction time accumulator (cpu->time_ns).
       **[T]** timing_suite checks computed times against the tables (8 cases).
-- [ ] **P4b** EF times for branches, JMP/JSR/RTS, EIS (operand-dependent
-      MUL/DIV/ASH), FP11, traps.
+- [x] **P4b** Timing for branches (taken .60 / not .30), SOB, JMP & JSR (by DST
+      mode), MFPI/MTPI/MFPD/MTPD, MUL (3.30), XOR, and the note-(J) R7 penalty —
+      all from Handbook App. C (PDF pp. 272-273). **[T]** timing_suite (15 cases)
+      + branch-timing CPU test. Tail: DIV/ASH/ASHC (operand/shift-count
+      dependent; the handbook gives only a range for DIV) and FP11 (P5).
 - [ ] **P4c** 11/70 cache (hit/miss) — add 1.02 us per read-cycle miss; model the
       cache to derive hit/miss deterministically.
 - [ ] **P4d** Reference `tick()` core (one tick per processor clock) for emergent

@@ -69,7 +69,12 @@ static pdp11_timing ef_single(int cls, int dmode, int dreg, bool bytemode) {
     pdp11_timing t = {0, 1};
     bool reg = (dmode == 0);
     switch (cls) {
-    case CLS_SINGLE_STD:   t.ns = reg ? 300u : 1200u; break;
+    case CLS_SINGLE_STD:
+        t.ns = reg ? 300u : 1200u;
+        if (reg && dreg == 7) {
+            t.ns += 300; // NOTE (J): +0.30 us if DST is R7
+        }
+        break;
     case CLS_SINGLE_NEG:   t.ns = reg ? 750u : 1500u; break;
     case CLS_SINGLE_TST:   t.ns = reg ? 300u : 450u;  break;
     case CLS_SINGLE_SHIFT: // ROR/ASR
@@ -134,10 +139,60 @@ pdp11_timing pdp11_instr_timing(uint16_t word) {
         return t;
     }
 
+    // JMP (0001DD) and JSR (004RDD): Instruction Time by DST mode (C-5).
+    if ((word & 0177700u) == 0000100u) { // JMP
+        static const uint32_t jmp_ns[8] = {0, 900, 900, 1200, 900, 1350, 1050,
+                                            1500};
+        static const uint32_t jmp_cyc[8] = {0, 1, 1, 2, 1, 2, 2, 3};
+        pdp11_timing t = {jmp_ns[dmode], jmp_cyc[dmode]};
+        return t;
+    }
+    if ((word & 0177000u) == 0004000u) { // JSR
+        static const uint32_t jsr_ns[8] = {0, 1950, 1950, 2250, 1950, 2400,
+                                            2100, 2550};
+        static const uint32_t jsr_cyc[8] = {0, 1, 1, 2, 1, 2, 2, 3};
+        pdp11_timing t = {jsr_ns[dmode], jsr_cyc[dmode]};
+        return t;
+    }
+
+    // EIS / XOR (top nibble 7). MUL and XOR are exact; DIV and ASH/ASHC are
+    // operand/shift-count dependent (P4b tail — the handbook gives only a range
+    // for DIV), so a representative time is used and noted.
+    if (top == 007) {
+        int op = (word >> 9) & 07; // IR<11:9>
+        if (op == 0) { // MUL: SRC time + 3.30 us
+            pdp11_timing t = {addr_ns[dmode] + 3300, addr_cyc[dmode] + 1};
+            return t;
+        }
+        if (op == 4) { // XOR: R (reg) + DST time + EF
+            pdp11_timing t = {addr_ns[dmode] + (dmode == 0 ? 300u : 1200u),
+                              addr_cyc[dmode] + 1};
+            return t;
+        }
+        // DIV (1), ASH (2), ASHC (3): representative, refined at P4b tail.
+        pdp11_timing t = {addr_ns[dmode] + 3300, addr_cyc[dmode] + 1};
+        return t;
+    }
+
     // Single-operand instructions (word 0050-0067, byte 1050-1067).
     uint16_t code = (uint16_t)((word >> 6) & 01777u);
     uint16_t base = (uint16_t)(code & 0777u);
     bytemode = (code & 01000u) != 0;
+
+    // MFPI/MFPD (0065): "use with SRC times" + 1.50 EF (C-4).
+    if (base == 0065) {
+        pdp11_timing t = {addr_ns[dmode] + 1500, addr_cyc[dmode] + 1};
+        return t;
+    }
+    // MTPI/MTPD (0066): Instruction Time by DST mode (C-5).
+    if (base == 0066) {
+        static const uint32_t mtp_ns[8] = {900, 1650, 1650, 2100, 1800, 2250,
+                                           2100, 2550};
+        static const uint32_t mtp_cyc[8] = {1, 2, 2, 3, 2, 3, 3, 4};
+        pdp11_timing t = {mtp_ns[dmode], mtp_cyc[dmode]};
+        return t;
+    }
+
     if (base >= 0050 && base <= 0067) {
         int cls;
         switch (base) {
