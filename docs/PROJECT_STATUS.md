@@ -33,7 +33,9 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | Interrupts (priority-gated) / PIRQ / RESET / WAIT | **working** (P2d) | `intr` probe byte-identical to SimH; unit tests |
 | MARK | **working** (P2d) | `mark` probe byte-identical to SimH |
 | **CPU (integer) — P1+P2 COMPLETE** | **done** | 10 SimH goldens + 36 unit tests |
-| MMU (KT11, 22-bit, I/D) | not started | — |
+| MMU relocation (KT11, 22-bit, PAR/PDR) | **working** (P3a) | `mmu` probe byte-identical to SimH; unit test |
+| MMU I/D space + Super/User modes | not started (P3b) | — |
+| MMU access control / aborts / MMR status | not started (P3c) | — |
 | Cache + Unibus/Massbus timing | not started | — (the cycle-accuracy core) |
 | FP11-C floating point | not started | — |
 | Devices (KW11-L, DL11, RK, RP, TM/TU) | not started | — |

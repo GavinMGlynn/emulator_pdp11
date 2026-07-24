@@ -50,13 +50,26 @@ void pdp11_cpu_reset(pdp11_cpu *cpu) {
     cpu->waiting = false;
     cpu->trace_pending = false;
     cpu->pirq = 0;
+    cpu->mmr0 = 0;
+    cpu->mmr3 = 0;
+    for (int i = 0; i < 64; ++i) {
+        cpu->par[i] = 0;
+        cpu->pdr[i] = 0;
+    }
     cpu->instr_count = 0;
 }
+
+// CPU memory access goes through these (MMU relocation + I/O-page decode),
+// defined below. Word accesses fault on odd addresses.
+static uint16_t cpu_read_word(pdp11_cpu *cpu, uint32_t va);
+static void cpu_write_word(pdp11_cpu *cpu, uint32_t va, uint16_t value);
+static uint8_t cpu_read_byte(pdp11_cpu *cpu, uint32_t va);
+static void cpu_write_byte(pdp11_cpu *cpu, uint32_t va, uint8_t value);
 
 // --- Instruction fetch ------------------------------------------------------
 // Read the word at the PC and advance the PC by two.
 static uint16_t fetch(pdp11_cpu *cpu) {
-    uint16_t word = pdp11_mem_read_word(cpu->mem, cpu->r[PDP11_PC]);
+    uint16_t word = cpu_read_word(cpu, cpu->r[PDP11_PC]);
     cpu->r[PDP11_PC] = (uint16_t)(cpu->r[PDP11_PC] + 2u);
     return word;
 }
@@ -95,7 +108,7 @@ static operand decode_operand(pdp11_cpu *cpu, uint8_t spec, bool bytemode) {
         cpu->r[reg] = (uint16_t)(cpu->r[reg] + operand_step(reg, bytemode));
         break;
     case 3: // @(Rn)+ — autoincrement deferred  (PC: absolute @#A)
-        op.addr = pdp11_mem_read_word(cpu->mem, cpu->r[reg]);
+        op.addr = cpu_read_word(cpu, cpu->r[reg]);
         cpu->r[reg] = (uint16_t)(cpu->r[reg] + 2u);
         break;
     case 4: // -(Rn) — autodecrement
@@ -104,7 +117,7 @@ static operand decode_operand(pdp11_cpu *cpu, uint8_t spec, bool bytemode) {
         break;
     case 5: // @-(Rn) — autodecrement deferred
         cpu->r[reg] = (uint16_t)(cpu->r[reg] - 2u);
-        op.addr = pdp11_mem_read_word(cpu->mem, cpu->r[reg]);
+        op.addr = cpu_read_word(cpu, cpu->r[reg]);
         break;
     case 6: { // X(Rn) — index  (PC: relative)
         uint16_t base = fetch(cpu);
@@ -114,7 +127,7 @@ static operand decode_operand(pdp11_cpu *cpu, uint8_t spec, bool bytemode) {
     case 7: { // @X(Rn) — index deferred  (PC: relative deferred)
         uint16_t base = fetch(cpu);
         uint16_t ptr = (uint16_t)(base + cpu->r[reg]);
-        op.addr = pdp11_mem_read_word(cpu->mem, ptr);
+        op.addr = cpu_read_word(cpu, ptr);
         break;
     }
     default: // unreachable: mode is masked to 3 bits
@@ -163,25 +176,138 @@ static void put_pirq(pdp11_cpu *cpu, uint16_t value) {
     cpu->pirq = (uint16_t)(req | encoded);
 }
 
-static uint16_t cpu_read_word(pdp11_cpu *cpu, uint32_t addr) {
-    if (addr & 1u) { // a word reference to an odd address traps through vector 4
-        cpu_bus_fault(cpu, VEC_BUS);
+// --- KT11 memory management -------------------------------------------------
+#define MMR0_MME   0000001u // management enable
+#define MMR3_M22E  0000020u // 22-bit enable
+#define PAMASK22   017777777u // 22-bit physical address mask
+#define IOPAGE_TOP 017760000u // physical base of the 8 KB I/O page
+
+// Relocate a 16-bit virtual address to a physical address. When management is
+// off this is the identity in the low 56 KB, with the top 8 KB folded onto the
+// I/O page (matching the hardware and SimH relocR). Access-control and page-
+// length aborts arrive at P3c; I/D-space separation and Super/User modes at P3b
+// (D references use the I-space registers while MMR3 D-space is disabled).
+static uint32_t mmu_relocate(const pdp11_cpu *cpu, uint16_t va) {
+    if (cpu->mmr0 & MMR0_MME) {
+        int mode = (cpu->psw >> 14) & 03;
+        int idx = (mode << 4) | ((va >> 13) & 07); // dspace 0 for now
+        uint32_t pa = ((uint32_t)(va & 017777u)
+                       + ((uint32_t)cpu->par[idx] << 6)) & PAMASK22;
+        if (!(cpu->mmr3 & MMR3_M22E)) { // 18-bit relocation
+            pa &= 0777777u;
+            if (pa >= 0760000u) {
+                pa = 017000000u | pa;
+            }
+        }
+        return pa;
     }
-    switch (addr & 0177777u) {
+    uint32_t pa = va & 0177777u;
+    if (pa >= 0160000u) {
+        pa = 017600000u | pa;
+    }
+    return pa;
+}
+
+static bool is_iopage(uint32_t pa) { return pa >= IOPAGE_TOP; }
+
+// Map an I/O-page register address (pa & 0177777, i.e. 0160000-0177777) to its
+// PAR/PDR slot, or return -1. The 12 blocks of 8 cover Kernel/Super/User × I/D.
+static int apr_index(uint16_t a, bool *is_par) {
+    static const struct { uint16_t base; bool par; int idx0; } blk[] = {
+        {0172300u, false, 0},  {0172320u, false, 8},  // Kernel I/D PDR
+        {0172340u, true, 0},   {0172360u, true, 8},   // Kernel I/D PAR
+        {0172200u, false, 16}, {0172220u, false, 24}, // Super I/D PDR
+        {0172240u, true, 16},  {0172260u, true, 24},  // Super I/D PAR
+        {0177600u, false, 48}, {0177620u, false, 56}, // User I/D PDR
+        {0177640u, true, 48},  {0177660u, true, 56},  // User I/D PAR
+    };
+    for (size_t i = 0; i < sizeof blk / sizeof blk[0]; ++i) {
+        if (a >= blk[i].base && a <= (uint16_t)(blk[i].base + 016u)) {
+            *is_par = blk[i].par;
+            return blk[i].idx0 + ((a - blk[i].base) >> 1);
+        }
+    }
+    return -1;
+}
+
+static uint16_t io_read(pdp11_cpu *cpu, uint16_t a) {
+    bool is_par;
+    int idx;
+    switch (a) {
     case IOPAGE_PSW:  return cpu->psw;
     case IOPAGE_PIRQ: return cpu->pirq;
-    default:          return pdp11_mem_read_word(cpu->mem, addr);
+    case 0177572u:    return cpu->mmr0; // MMR0
+    case 0172516u:    return cpu->mmr3; // MMR3
+    default: break;
+    }
+    idx = apr_index(a, &is_par);
+    if (idx >= 0) {
+        return is_par ? cpu->par[idx] : cpu->pdr[idx];
+    }
+    return 0; // unmapped I/O register (proper NXM trap arrives with the Unibus)
+}
+
+static void io_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
+    bool is_par;
+    int idx;
+    switch (a) {
+    case IOPAGE_PSW:  cpu->psw = value; return;
+    case IOPAGE_PIRQ: put_pirq(cpu, value); return;
+    case 0177572u:    cpu->mmr0 = value; return;
+    case 0172516u:    cpu->mmr3 = value; return;
+    default: break;
+    }
+    idx = apr_index(a, &is_par);
+    if (idx >= 0) {
+        if (is_par) {
+            cpu->par[idx] = value;
+        } else {
+            cpu->pdr[idx] = value;
+        }
+    }
+    // else: unmapped — dropped for now (NXM trap with the Unibus at P6).
+}
+
+static uint16_t cpu_read_word(pdp11_cpu *cpu, uint32_t va) {
+    if (va & 1u) { // a word reference to an odd address traps through vector 4
+        cpu_bus_fault(cpu, VEC_BUS);
+    }
+    uint32_t pa = mmu_relocate(cpu, (uint16_t)va);
+    return is_iopage(pa) ? io_read(cpu, (uint16_t)(pa & 0177777u))
+                         : pdp11_mem_read_word(cpu->mem, pa);
+}
+
+static void cpu_write_word(pdp11_cpu *cpu, uint32_t va, uint16_t value) {
+    if (va & 1u) {
+        cpu_bus_fault(cpu, VEC_BUS);
+    }
+    uint32_t pa = mmu_relocate(cpu, (uint16_t)va);
+    if (is_iopage(pa)) {
+        io_write(cpu, (uint16_t)(pa & 0177777u), value);
+    } else {
+        pdp11_mem_write_word(cpu->mem, pa, value);
     }
 }
 
-static void cpu_write_word(pdp11_cpu *cpu, uint32_t addr, uint16_t value) {
-    if (addr & 1u) {
-        cpu_bus_fault(cpu, VEC_BUS);
+static uint8_t cpu_read_byte(pdp11_cpu *cpu, uint32_t va) {
+    uint32_t pa = mmu_relocate(cpu, (uint16_t)va);
+    if (is_iopage(pa)) {
+        uint16_t w = io_read(cpu, (uint16_t)(pa & 0177776u));
+        return (uint8_t)((pa & 1u) ? (w >> 8) : (w & 0377u));
     }
-    switch (addr & 0177777u) {
-    case IOPAGE_PSW:  cpu->psw = value; break; // T-bit rules land with full I/O
-    case IOPAGE_PIRQ: put_pirq(cpu, value); break;
-    default:          pdp11_mem_write_word(cpu->mem, addr, value); break;
+    return pdp11_mem_read_byte(cpu->mem, pa);
+}
+
+static void cpu_write_byte(pdp11_cpu *cpu, uint32_t va, uint8_t value) {
+    uint32_t pa = mmu_relocate(cpu, (uint16_t)va);
+    if (is_iopage(pa)) {
+        uint16_t reg = (uint16_t)(pa & 0177776u);
+        uint16_t w = io_read(cpu, reg);
+        w = (pa & 1u) ? (uint16_t)((w & 0377u) | ((uint32_t)value << 8))
+                      : (uint16_t)((w & 0177400u) | value);
+        io_write(cpu, reg, w);
+    } else {
+        pdp11_mem_write_byte(cpu->mem, pa, value);
     }
 }
 
@@ -192,7 +318,7 @@ static uint16_t read_operand(pdp11_cpu *cpu, operand op, bool bytemode) {
     if (op.is_reg) {
         return bytemode ? (uint16_t)(cpu->r[op.reg] & 0377u) : cpu->r[op.reg];
     }
-    return bytemode ? pdp11_mem_read_byte(cpu->mem, op.addr)
+    return bytemode ? cpu_read_byte(cpu, op.addr)
                     : cpu_read_word(cpu, op.addr);
 }
 
@@ -203,7 +329,7 @@ static void write_operand(pdp11_cpu *cpu, operand op, bool bytemode,
             ? (uint16_t)((cpu->r[op.reg] & 0177400u) | (value & 0377u))
             : value;
     } else if (bytemode) {
-        pdp11_mem_write_byte(cpu->mem, op.addr, (uint8_t)value);
+        cpu_write_byte(cpu, op.addr, (uint8_t)value);
     } else {
         cpu_write_word(cpu, op.addr, value);
     }
@@ -485,11 +611,11 @@ static bool try_single_op(pdp11_cpu *cpu, uint16_t word) {
 // --- Stack (R6) -------------------------------------------------------------
 static void push_word(pdp11_cpu *cpu, uint16_t value) {
     cpu->r[PDP11_SP] = (uint16_t)(cpu->r[PDP11_SP] - 2u);
-    pdp11_mem_write_word(cpu->mem, cpu->r[PDP11_SP] & ADDR_MASK, value);
+    cpu_write_word(cpu, cpu->r[PDP11_SP], value);
 }
 
 static uint16_t pop_word(pdp11_cpu *cpu) {
-    uint16_t value = pdp11_mem_read_word(cpu->mem, cpu->r[PDP11_SP] & ADDR_MASK);
+    uint16_t value = cpu_read_word(cpu, cpu->r[PDP11_SP]);
     cpu->r[PDP11_SP] = (uint16_t)(cpu->r[PDP11_SP] + 2u);
     return value;
 }
@@ -591,8 +717,8 @@ static void op_ccops(pdp11_cpu *cpu, uint16_t word) {
 // the new PC/PSW from the vector. PC is pushed last so RTI/RTT pop it first.
 static void do_trap(pdp11_cpu *cpu, uint16_t vector) {
     uint16_t old_psw = cpu->psw;
-    uint16_t new_pc = pdp11_mem_read_word(cpu->mem, vector);
-    uint16_t new_psw = pdp11_mem_read_word(cpu->mem, vector + 2u);
+    uint16_t new_pc = cpu_read_word(cpu, vector);
+    uint16_t new_psw = cpu_read_word(cpu, (uint16_t)(vector + 2u));
     push_word(cpu, old_psw);
     push_word(cpu, cpu->r[PDP11_PC]);
     cpu->r[PDP11_PC] = new_pc;

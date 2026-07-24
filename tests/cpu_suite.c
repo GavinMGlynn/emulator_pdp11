@@ -418,6 +418,20 @@ static void test_jmp_to_a_register_is_illegal_on_the_11_70(void) {
     TEST_ASSERT_EQUAL_HEX16(0001600u, cpu->r[PDP11_PC]); // trapped to handler
 }
 
+static void test_the_mmu_relocates_a_virtual_write_to_its_physical_page(void) {
+    cpu->par[1] = 0001000u; // VA page 1 (020000) -> PA 0100000
+    cpu->mmr3 = 0000020u;   // 22-bit enable
+    cpu->mmr0 = 0000001u;   // management enable
+    // MOV #123456, @#020000  (code page 0 maps identity via PAR[0]=0)
+    const uint16_t prog[] = {0012737u, 0123456u, 0020000u};
+    deposit(001000, prog, 3);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0123456u,
+                            pdp11_mem_read_word(cpu->mem, 0100000u));
+    // And nothing landed at the unrelocated virtual address.
+    TEST_ASSERT_EQUAL_HEX16(0u, pdp11_mem_read_word(cpu->mem, 0020000u));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -457,5 +471,6 @@ int main(void) {
     RUN_TEST(test_wait_idles_until_an_interrupt_is_granted);
     RUN_TEST(test_mark_restores_pc_from_r5_and_cleans_the_stack);
     RUN_TEST(test_jmp_to_a_register_is_illegal_on_the_11_70);
+    RUN_TEST(test_the_mmu_relocates_a_virtual_write_to_its_physical_page);
     return UNITY_END();
 }

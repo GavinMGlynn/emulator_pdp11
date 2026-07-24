@@ -22,6 +22,8 @@ Status values: `open` · `confirmed` (matches oracle) · `fixed` · `divergence`
 
 | `intr` (P2d): PIR7 requested via PIRQ at priority 0, handler at priority 7 clears it and RTIs | R0=1 R2=1, pushed frame PC=001016 PSW=010 | SimH 11/70 identical | confirmed | Validates PIRQ encoding (put_PIRQ), the priority-gated grant (level > PSW<7:5>), and the vector-0240 dispatch. |
 
+| `mmu` (P3a): kernel PARs map VA pages 1 & 2 to PA 0100000; write via one, read via the other | R0=0123456 (relocation worked) | SimH 11/70 identical | confirmed | Oracle caught a gap first: with PDRs=0 SimH aborts every access (ACF=0 non-resident) and halted at the MMU-enable boundary; our P3a ignores the PDR (access control is P3c). Setting PDRs read/write (077406) let SimH run; the PAR-based translation then matched exactly. |
+
 ## Timing (DEC paper oracle) — none yet
 Timing campaigns begin at P4. Each row will cite the KB11-C manual page/table it
 derives from, since SimH cannot verify cycle counts.

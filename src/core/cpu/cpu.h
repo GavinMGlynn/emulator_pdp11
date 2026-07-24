@@ -34,6 +34,14 @@ typedef struct pdp11_cpu {
     bool trace_pending; // a T-bit trace trap is due before the next instruction
     uint16_t pirq; // program interrupt request register (0177772)
 
+    // KT11 memory management (P3). MMR0<0> enables relocation; MMR3<M22E>
+    // selects 22-bit. The PAR/PDR file is indexed (mode<<4)|(dspace<<3)|page,
+    // mode 0=Kernel 1=Super 3=User (2 unused).
+    uint16_t mmr0;
+    uint16_t mmr3;
+    uint16_t par[64];
+    uint16_t pdr[64];
+
     // Mid-instruction fault handling. A bus/odd-address (later MMU) fault
     // longjmps to abort_env, set up at the top of each instruction, and the
     // step loop then traps through abort_vec.

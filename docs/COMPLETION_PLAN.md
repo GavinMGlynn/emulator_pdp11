@@ -55,9 +55,18 @@ goldens + 36 unit tests, green on debug and release.
 - *Verify:* trap/interrupt probes **[A]**; EIS probes **[A]**. Timing **[T]** at P4.
 
 ## P3 — Memory management (KT11, 22-bit)
-- [ ] PAR/PDR per mode (Kernel/Super/User), I/D space, dual register sets.
-- [ ] Address translation, page faults/aborts, SR0–SR2, 22-bit physical space.
-- *Verify:* fault/abort + relocation probes **[A]**; SR semantics **[A]**.
+- [x] **P3a** 22-bit address relocation: MMR0<0> enable, MMR3<M22E>, the full
+      PAR/PDR I/O-page register file (Kernel/Super/User × I/D), and the
+      VA→PA translation, with all CPU accesses (fetch, operands, stack, vectors)
+      routed through it. MMU-off stays identity (existing 11 goldens unchanged).
+      **[A]** `mmu` probe (relocate a write and read it back through a second
+      mapping) byte-identical to SimH.
+- [ ] **P3b** I/D-space separation; Super/User modes + mode-correct stack/vector
+      access; dual register sets.
+- [ ] **P3c** Access control (PDR ACF) + page-length aborts → vector 0250; MMR0
+      status capture, MMR1 (auto-inc/dec recovery), MMR2. (SimH aborts on ACF=0,
+      which P3a's probe worked around by setting PDRs read/write.)
+- *Verify:* fault/abort + relocation probes **[A]**; MMR status **[A]**.
 
 ## P4 — Cache + Unibus/Massbus timing  ← the cycle-accuracy core
 - [ ] 11/70 cache (hit/miss), the primary driver of instruction cycle counts.
