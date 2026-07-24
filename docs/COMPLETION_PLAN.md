@@ -119,8 +119,10 @@ recovery) and stack-limit yellow/red.
 - [x] **P5a** FP state (6 accumulators, FPS, FEC/FEA) + control instructions:
       CFCC, SETF/SETI/SETD/SETL, LDFPS, STFPS, STST. **[A]** `fp` probe
       byte-identical to SimH (which has the FP11 on the 11/70).
-- [ ] **P5b** Load/store: LDF/LDD, STF/STD; the packed single/double memory
-      format and the FAC representation.
+- [x] **P5b** Load/store LDF/LDD, STF/STD, and CLRf/TSTf/ABSf/NEGf, with the
+      64-bit FAC packing (word0<<48..word3), FP-sized autoincrement addressing,
+      and the FP condition codes (N=sign, Z=exp 0). **[A]** `fpls` probe (load
+      1.0, store, negate, store -1.0) byte-identical to SimH.
 - [ ] **P5c** Arithmetic: ADD/SUB/MUL/DIV/CMP/MOD, conversions (LDC*/STC*),
       LDEXP/STEXP, rounding & the FP exception model (FEC/FEA, traps).
 - *Verify:* FP arithmetic probes **[A]**; FP timing **[T]**.

@@ -537,6 +537,29 @@ static void test_setd_and_setf_toggle_the_fps_double_bit(void) {
     TEST_ASSERT_FALSE(cpu->fps & 0000200u); // D bit cleared
 }
 
+static void test_ldf_stf_round_trip_a_single_through_an_accumulator(void) {
+    // mem[2000] = 1.0 (040200 000000); LDF @#2000,AC0 ; STF AC0,@#2010
+    pdp11_mem_write_word(cpu->mem, 0002000u, 0040200u);
+    pdp11_mem_write_word(cpu->mem, 0002002u, 0u);
+    const uint16_t prog[] = {0172437u, 0002000u,  // LDF @#2000, AC0
+                             0174037u, 0002010u};  // STF AC0, @#2010
+    deposit(001000, prog, 4);
+    pdp11_cpu_step(cpu); // LDF
+    TEST_ASSERT_EQUAL_HEX64(0x4080000000000000ULL, cpu->fac[0]);
+    pdp11_cpu_step(cpu); // STF
+    TEST_ASSERT_EQUAL_HEX16(0040200u, pdp11_mem_read_word(cpu->mem, 0002010u));
+    TEST_ASSERT_EQUAL_HEX16(0u, pdp11_mem_read_word(cpu->mem, 0002012u));
+}
+
+static void test_negf_flips_the_sign_of_an_accumulator(void) {
+    cpu->fac[0] = 0x4080000000000000ULL; // 1.0
+    const uint16_t prog[] = {0170700u}; // NEGF AC0
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX64(0xC080000000000000ULL, cpu->fac[0]); // sign set
+    TEST_ASSERT_TRUE(cpu->fps & 0000010u); // FP N set
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -584,5 +607,7 @@ int main(void) {
     RUN_TEST(test_branch_timing_is_600ns_taken_and_300ns_not_taken);
     RUN_TEST(test_ldfps_and_cfcc_move_the_fp_status_and_condition_codes);
     RUN_TEST(test_setd_and_setf_toggle_the_fps_double_bit);
+    RUN_TEST(test_ldf_stf_round_trip_a_single_through_an_accumulator);
+    RUN_TEST(test_negf_flips_the_sign_of_an_accumulator);
     return UNITY_END();
 }

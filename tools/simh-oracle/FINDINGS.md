@@ -34,6 +34,8 @@ Status values: `open` · `confirmed` (matches oracle) · `fixed` · `divergence`
 
 | `fp` (P5a): FP control — LDFPS/STFPS move the FP status, SET* mode bits, CFCC copies FP CC to the PSW | mem[4000]=200 mem[4002]=17 PSW=17 | SimH 11/70 identical | confirmed | Validates the FP11 control group; the FP11 is standard on the 11/70. |
 
+| `fpls` (P5b): LDF 1.0 into AC0, STF back, NEGF, STF -1.0 | mem[4010]=040200/0, mem[4014]=0140200/0 | SimH 11/70 identical | confirmed | Validates the 64-bit FAC packing (word0<<48..word3), LDF/STF, and NEGF sign flip. |
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|

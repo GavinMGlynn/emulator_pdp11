@@ -1133,56 +1133,182 @@ static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
 
 // --- FP11-C floating point (P5) ---------------------------------------------
 #define FPS_CC 0000017u // condition codes (N Z V C), same positions as the PSW
+#define FPS_N  0000010u
+#define FPS_Z  0000004u
 #define FPS_D  0000200u // 0 = single, 1 = double
 #define FPS_L  0000100u // 0 = short integer, 1 = long
 #define FPS_RW 0147757u // writable FPS bits (SimH FPS_RW)
+#define FP_SIGNBIT (1ULL << 63)
 
-// FP11 instruction decode (top nibble 017). P5a implements the control group
-// (IR<11:8> == 0): CFCC, SETF/SETI/SETD/SETL, LDFPS, STFPS, STST. The load/
-// store and arithmetic groups (IR<11:8> != 0) arrive in later P5 increments.
+// A floating value is held in a 64-bit accumulator as word0<<48 | word1<<32 |
+// word2<<16 | word3, i.e. big-endian memory-word order (word0 = lowest address).
+// Single precision uses the high 32 bits; the exponent is bits 62-55 (8 bits).
+static uint16_t fp_exp(uint64_t v) { return (uint16_t)((v >> 55) & 0377u); }
+
+// Update the FP condition codes from a result: N = sign, Z = exponent 0.
+static uint16_t fp_setcc(uint16_t fps, uint64_t v, uint16_t newv) {
+    fps = (uint16_t)((fps & ~FPS_CC) | newv);
+    if (v & FP_SIGNBIT) {
+        fps |= FPS_N;
+    }
+    if (fp_exp(v) == 0) {
+        fps |= FPS_Z;
+    }
+    return fps;
+}
+
+// A resolved FP operand: a register (FR), an immediate (one word), or memory.
+// Autoincrement/decrement steps by the operand length (4 bytes single / 8 byte
+// double); deferred modes step the pointer by 2.
+typedef struct { bool is_reg; bool imm; uint8_t reg; uint16_t immw; uint32_t addr; } fp_op;
+
+static fp_op decode_fp(pdp11_cpu *cpu, uint8_t spec, int len_words) {
+    uint8_t mode = (uint8_t)((spec >> 3) & 07u);
+    uint8_t reg = (uint8_t)(spec & 07u);
+    uint16_t step = (uint16_t)(len_words * 2);
+    fp_op o = {0};
+    switch (mode) {
+    case 0: o.is_reg = true; o.reg = reg; break;
+    case 1: o.addr = cpu->r[reg]; break;
+    case 2:
+        if (reg == PDP11_PC) { o.imm = true; o.immw = fetch(cpu); }
+        else { o.addr = cpu->r[reg]; cpu->r[reg] = (uint16_t)(cpu->r[reg] + step); }
+        break;
+    case 3:
+        if (reg == PDP11_PC) { o.addr = fetch(cpu); }
+        else { o.addr = cpu_read_word(cpu, cpu->r[reg]);
+               cpu->r[reg] = (uint16_t)(cpu->r[reg] + 2u); }
+        break;
+    case 4: cpu->r[reg] = (uint16_t)(cpu->r[reg] - step); o.addr = cpu->r[reg]; break;
+    case 5: cpu->r[reg] = (uint16_t)(cpu->r[reg] - 2u);
+            o.addr = cpu_read_word(cpu, cpu->r[reg]); break;
+    case 6: { uint16_t b = fetch(cpu); o.addr = (uint16_t)(b + cpu->r[reg]); break; }
+    case 7: { uint16_t b = fetch(cpu);
+              o.addr = cpu_read_word(cpu, (uint16_t)(b + cpu->r[reg])); break; }
+    default: break;
+    }
+    o.addr &= ADDR_MASK;
+    return o;
+}
+
+static uint64_t read_fp(pdp11_cpu *cpu, fp_op o, int len_words) {
+    if (o.is_reg) {
+        return (o.reg < 6) ? cpu->fac[o.reg] : 0;
+    }
+    if (o.imm) {
+        return (uint64_t)o.immw << 48; // immediate: one word in the high position
+    }
+    uint64_t h = ((uint64_t)cpu_read_word(cpu, o.addr) << 16)
+                 | cpu_read_word(cpu, (uint16_t)(o.addr + 2u));
+    uint64_t l = 0;
+    if (len_words == 4) {
+        l = ((uint64_t)cpu_read_word(cpu, (uint16_t)(o.addr + 4u)) << 16)
+            | cpu_read_word(cpu, (uint16_t)(o.addr + 6u));
+    }
+    return (h << 32) | l;
+}
+
+static void write_fp(pdp11_cpu *cpu, fp_op o, int len_words, uint64_t v) {
+    if (o.is_reg) {
+        if (o.reg < 6) {
+            cpu->fac[o.reg] = v;
+        }
+        return;
+    }
+    cpu_write_word(cpu, o.addr, (uint16_t)((v >> 48) & 0177777u));
+    cpu_write_word(cpu, (uint16_t)(o.addr + 2u), (uint16_t)((v >> 32) & 0177777u));
+    if (len_words == 4) {
+        cpu_write_word(cpu, (uint16_t)(o.addr + 4u), (uint16_t)((v >> 16) & 0177777u));
+        cpu_write_word(cpu, (uint16_t)(o.addr + 6u), (uint16_t)(v & 0177777u));
+    }
+}
+
+// FP11 instruction decode (top nibble 017). P5a: control group. P5b: load/store
+// (LDf/STf) and CLR/TST/ABS/NEG. Arithmetic (ADD/SUB/MUL/DIV, conversions) and
+// the exception model are P5c.
 static void op_fp11(pdp11_cpu *cpu, uint16_t word) {
     int major = (word >> 8) & 017;
     int subop = (word >> 6) & 03;
+    uint8_t spec = (uint8_t)(word & 077u);
+    int len = (cpu->fps & FPS_D) ? 4 : 2;
 
-    if (major != 0) {
-        return; // LDf/STf/arith — P5b (no-op for now)
-    }
-    switch (subop) {
-    case 0: // specials
-        switch (word) {
-        case 0170000: // CFCC: FP condition codes -> PSW condition codes
-            cpu->psw = (uint16_t)((cpu->psw & ~017u) | (cpu->fps & FPS_CC));
+    switch (major) {
+    case 000:
+        switch (subop) {
+        case 0: // specials
+            switch (word) {
+            case 0170000: // CFCC
+                cpu->psw = (uint16_t)((cpu->psw & ~017u) | (cpu->fps & FPS_CC));
+                break;
+            case 0170001: cpu->fps = (uint16_t)(cpu->fps & ~FPS_D); break;
+            case 0170002: cpu->fps = (uint16_t)(cpu->fps & ~FPS_L); break;
+            case 0170011: cpu->fps |= FPS_D; break;
+            case 0170012: cpu->fps |= FPS_L; break;
+            default: break;
+            }
             break;
-        case 0170001: cpu->fps = (uint16_t)(cpu->fps & ~FPS_D); break; // SETF
-        case 0170002: cpu->fps = (uint16_t)(cpu->fps & ~FPS_L); break; // SETI
-        case 0170011: cpu->fps |= FPS_D; break;                        // SETD
-        case 0170012: cpu->fps |= FPS_L; break;                        // SETL
-        default: break; // FEC_OP trap lands with the exception model (P5)
+        case 1: { // LDFPS
+            operand s = decode_operand(cpu, spec, false);
+            cpu->fps = (uint16_t)(read_operand(cpu, s, false) & FPS_RW);
+            break;
+        }
+        case 2: { // STFPS
+            cpu->fps &= FPS_RW;
+            operand d = decode_operand(cpu, spec, false);
+            write_operand(cpu, d, false, cpu->fps);
+            break;
+        }
+        case 3: { // STST
+            operand d = decode_operand(cpu, spec, false);
+            if (d.is_reg) {
+                cpu->r[d.reg] = cpu->fec;
+            } else {
+                cpu_write_word(cpu, d.addr, cpu->fec);
+                cpu_write_word(cpu, (uint16_t)(d.addr + 2u), cpu->fea);
+            }
+            break;
+        }
+        default: break;
         }
         break;
-    case 1: { // LDFPS
-        operand s = decode_operand(cpu, (uint8_t)(word & 077u), false);
-        cpu->fps = (uint16_t)(read_operand(cpu, s, false) & FPS_RW);
-        break;
-    }
-    case 2: { // STFPS
-        cpu->fps &= FPS_RW;
-        operand d = decode_operand(cpu, (uint8_t)(word & 077u), false);
-        write_operand(cpu, d, false, cpu->fps);
-        break;
-    }
-    case 3: { // STST: store FEC then FEA
-        operand d = decode_operand(cpu, (uint8_t)(word & 077u), false);
-        if (d.is_reg) {
-            cpu->r[d.reg] = cpu->fec;
+
+    case 001: { // CLR (0) / TST (1) / ABS (2) / NEG (3)
+        fp_op o = decode_fp(cpu, spec, len);
+        if (subop == 0) { // CLRf
+            write_fp(cpu, o, len, 0);
+            cpu->fps = (uint16_t)((cpu->fps & ~FPS_CC) | FPS_Z);
         } else {
-            cpu_write_word(cpu, d.addr, cpu->fec);
-            cpu_write_word(cpu, (uint16_t)(d.addr + 2u), cpu->fea);
+            uint64_t v = read_fp(cpu, o, len);
+            if (subop == 2) { // ABSf
+                v = (fp_exp(v) == 0) ? 0 : (v & ~FP_SIGNBIT);
+                write_fp(cpu, o, len, v);
+            } else if (subop == 3) { // NEGf
+                v = (fp_exp(v) == 0) ? 0 : (v ^ FP_SIGNBIT);
+                write_fp(cpu, o, len, v);
+            }
+            cpu->fps = fp_setcc(cpu->fps, v, 0);
         }
         break;
     }
-    default:
+
+    case 005: { // LDf
+        int ac = (word >> 6) & 03;
+        fp_op o = decode_fp(cpu, spec, len);
+        uint64_t v = read_fp(cpu, o, len);
+        cpu->fac[ac] = v;
+        cpu->fps = fp_setcc(cpu->fps, v, 0);
         break;
+    }
+
+    case 010: { // STf
+        int ac = (word >> 6) & 03;
+        fp_op o = decode_fp(cpu, spec, len);
+        write_fp(cpu, o, len, cpu->fac[ac]);
+        break;
+    }
+
+    default:
+        break; // arithmetic / conversions — P5c
     }
 }
 
