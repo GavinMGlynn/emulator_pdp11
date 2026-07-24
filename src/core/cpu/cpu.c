@@ -36,6 +36,7 @@ void pdp11_cpu_reset(pdp11_cpu *cpu) {
     }
     cpu->psw = 0;
     cpu->halted = false;
+    cpu->trace_pending = false;
     cpu->instr_count = 0;
 }
 
@@ -489,6 +490,39 @@ static void op_ccops(pdp11_cpu *cpu, uint16_t word) {
     }
 }
 
+// --- Traps ------------------------------------------------------------------
+// Trap/interrupt vectors (kernel-mode only until the MMU adds modes at P3).
+#define VEC_BUS      0004u // odd address / bus error / stack limit / nxm
+#define VEC_RESERVED 0010u // reserved / illegal instruction
+#define VEC_BPT      0014u // BPT and the T-bit trace trap
+#define VEC_IOT      0020u // IOT
+#define VEC_EMT      0030u // EMT
+#define VEC_TRAP     0034u // TRAP
+
+// Enter a trap: push the old PSW then the old PC on the current stack, and load
+// the new PC/PSW from the vector. PC is pushed last so RTI/RTT pop it first.
+static void do_trap(pdp11_cpu *cpu, uint16_t vector) {
+    uint16_t old_psw = cpu->psw;
+    uint16_t new_pc = pdp11_mem_read_word(cpu->mem, vector);
+    uint16_t new_psw = pdp11_mem_read_word(cpu->mem, vector + 2u);
+    push_word(cpu, old_psw);
+    push_word(cpu, cpu->r[PDP11_PC]);
+    cpu->r[PDP11_PC] = new_pc;
+    cpu->psw = new_psw;
+}
+
+// RTI/RTT: pop PC then PSW. On the 11/70 an RTI (but not RTT) that restores the
+// T bit takes the trace trap *immediately*, before the instruction at the
+// restored PC; RTT defers to the normal after-instruction rule. This is the one
+// documented behavioural difference between the two (KB11-C; verified vs SimH).
+static void op_rti(pdp11_cpu *cpu, bool is_rtt) {
+    cpu->r[PDP11_PC] = pop_word(cpu);
+    cpu->psw = pop_word(cpu);
+    if (!is_rtt && (cpu->psw & PDP11_PSW_T)) {
+        cpu->trace_pending = true;
+    }
+}
+
 // Decode the groups that aren't clean double-operand opcodes: single-operand
 // instructions, branches, JMP/JSR/RTS/SOB, condition-code ops, HALT.
 static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
@@ -508,15 +542,39 @@ static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
         op_jsr(cpu, word);
     } else if ((word & 0177000u) == 0077000) {
         op_sob(cpu, word);
+    } else if ((word & 0177400u) == 0104000) {
+        do_trap(cpu, VEC_EMT);  // EMT (104000-104377)
+    } else if ((word & 0177400u) == 0104400) {
+        do_trap(cpu, VEC_TRAP); // TRAP (104400-104777)
+    } else if (word == 0000002) {
+        op_rti(cpu, false);     // RTI
+    } else if (word == 0000006) {
+        op_rti(cpu, true);      // RTT
+    } else if (word == 0000003) {
+        do_trap(cpu, VEC_BPT);  // BPT
+    } else if (word == 0000004) {
+        do_trap(cpu, VEC_IOT);  // IOT
     } else if (word == 0) {
-        cpu->halted = true; // HALT
+        cpu->halted = true;     // HALT
     }
-    // WAIT/RTI/RTT/EMT/TRAP/RESET, EIS and FP11 remain no-ops until P2/P5.
+    // WAIT/RESET, EIS and FP11 remain no-ops until later P2/P5 increments.
 }
 
 void pdp11_cpu_step(pdp11_cpu *cpu) {
     if (cpu->halted) {
         return;
+    }
+
+    // Take a trace trap that came due before this instruction (SimH ordering:
+    // pending traps are serviced at the top of the loop, before the fetch).
+    if (cpu->trace_pending) {
+        cpu->trace_pending = false;
+        do_trap(cpu, VEC_BPT);
+        return;
+    }
+    // Arm a trace trap to fire after this instruction if T is set going in.
+    if (cpu->psw & PDP11_PSW_T) {
+        cpu->trace_pending = true;
     }
 
     uint16_t word = fetch(cpu);

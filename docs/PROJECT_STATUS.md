@@ -26,8 +26,10 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | Build / CI / oracle harness | **working** (P0) | CTest green on debug+release; golden vs SimH |
 | CPU single/double-operand set | **working** (P1a) | 90-instr `alu` battery byte-identical to SimH; unit tests |
 | CPU branches / JMP / JSR / RTS / SOB / cc-ops | **working** (P1b) | `flow` probe (loop+subroutine) byte-identical to SimH; unit tests |
-| EIS (MUL/DIV/ASH/ASHC) | not started (P2) | — |
-| Traps / interrupts / PIRQ | not started (P2) | — |
+| Traps: BPT/IOT/EMT/TRAP/RTI/RTT + T-bit trace | **working** (P2a) | `trap`+`trace` probes byte-identical to SimH; unit tests |
+| Reserved-instruction / odd-address traps | not started (P2b) | — |
+| EIS (MUL/DIV/ASH/ASHC/XOR) | not started (P2c) | — |
+| Interrupts (BR4-7 priority) / PIRQ | not started (P2d) | — |
 | MMU (KT11, 22-bit, I/D) | not started | — |
 | Cache + Unibus/Massbus timing | not started | — (the cycle-accuracy core) |
 | FP11-C floating point | not started | — |

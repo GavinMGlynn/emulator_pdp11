@@ -31,11 +31,14 @@ Verification legend: **[A]** = architectural diff vs SimH oracle;
   **[T]** are deferred to P4 (they need the `tick()`/cache timing model).
 
 ## P2 — Traps, interrupts, EIS
-- [ ] Trap vectors (4 bus/illegal, 10 reserved, 14 BPT, 20 IOT, 30 EMT, 34 TRAP),
-      RTI/RTT, T-bit trace, stack-limit, PIRQ/PIR.
-- [ ] 7-level BR interrupt priority + arbitration; RESET/WAIT semantics.
-- [ ] EIS: MUL, DIV, ASH, ASHC, XOR.
-- *Verify:* trap/interrupt probes **[A]**; EIS probes **[A]**; timing **[T]**.
+- [x] **P2a** Trap mechanism + BPT/IOT/EMT/TRAP vectors, RTI/RTT, T-bit trace
+      (incl. the RTI-immediate vs RTT-deferred distinction). **[A]** `trap` +
+      `trace` probes byte-identical to SimH.
+- [ ] **P2b** Reserved/illegal-instruction trap (vec 10) and odd-address / bus
+      trap (vec 4); stack-limit (vec 4 yellow/red).
+- [ ] **P2c** EIS: MUL, DIV, ASH, ASHC, XOR.
+- [ ] **P2d** 7-level BR interrupt priority + arbitration; PIRQ/PIR; RESET/WAIT.
+- *Verify:* trap/interrupt probes **[A]**; EIS probes **[A]**. Timing **[T]** at P4.
 
 ## P3 — Memory management (KT11, 22-bit)
 - [ ] PAR/PDR per mode (Kernel/Super/User), I/D space, dual register sets.

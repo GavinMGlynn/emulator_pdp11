@@ -29,6 +29,7 @@ typedef struct pdp11_cpu {
     uint16_t r[8]; // R0-R7 (kernel set; alternate set + modes land later)
     uint16_t psw;  // processor status word
     bool halted;   // set by HALT until the next reset
+    bool trace_pending; // a T-bit trace trap is due before the next instruction
 
     // Cycle accounting. The reference core will drive this from the KB11-C
     // timing model once cache/bus timing lands (COMPLETION_PLAN P4); until then

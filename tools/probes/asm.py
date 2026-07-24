@@ -97,6 +97,14 @@ class Asm:
     def rts(self, reg):
         self._emit(1, lambda L, a: [0o000200 | (reg & 7)])
 
+    def push_imm(self, value):
+        # MOV #value, -(R6)
+        self._emit(2, lambda L, a: [0o012746, value & 0o177777])
+
+    def push_label(self, target):
+        # MOV #addr(target), -(R6)
+        self._emit(2, lambda L, a: [0o012746, L[target] & 0o177777])
+
     def ccop(self, word):
         self._emit(1, lambda L, a: [word & 0o177777])
 

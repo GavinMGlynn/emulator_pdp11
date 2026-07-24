@@ -251,6 +251,35 @@ static void test_sec_sets_and_clc_clears_the_carry_flag(void) {
     TEST_ASSERT_FALSE(cpu->psw & PDP11_PSW_C);
 }
 
+static void test_trap_pushes_psw_then_pc_and_vectors_through_034(void) {
+    cpu->r[PDP11_SP] = 0002000u;
+    cpu->psw = PDP11_PSW_C; // a live flag to see preserved on the stack
+    pdp11_mem_write_word(cpu->mem, 0034u, 0001500u); // vector PC
+    pdp11_mem_write_word(cpu->mem, 0036u, 0000340u); // vector PSW (priority 7)
+    const uint16_t prog[] = {0104401u}; // TRAP 1
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0001500u, cpu->r[PDP11_PC]);        // new PC
+    TEST_ASSERT_EQUAL_HEX16(0000340u, cpu->psw);               // new PSW
+    TEST_ASSERT_EQUAL_HEX16(0001774u, cpu->r[PDP11_SP]);       // two words pushed
+    TEST_ASSERT_EQUAL_HEX16(0001002u,
+                            pdp11_mem_read_word(cpu->mem, 0001774u)); // old PC (top)
+    TEST_ASSERT_EQUAL_HEX16(PDP11_PSW_C,
+                            pdp11_mem_read_word(cpu->mem, 0001776u)); // old PSW
+}
+
+static void test_rti_pops_pc_then_psw(void) {
+    cpu->r[PDP11_SP] = 0001774u;
+    pdp11_mem_write_word(cpu->mem, 0001774u, 0001234u); // PC (top)
+    pdp11_mem_write_word(cpu->mem, 0001776u, 0000004u); // PSW (Z)
+    const uint16_t prog[] = {0000002u}; // RTI
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0001234u, cpu->r[PDP11_PC]);
+    TEST_ASSERT_EQUAL_HEX16(0000004u, cpu->psw);
+    TEST_ASSERT_EQUAL_HEX16(0002000u, cpu->r[PDP11_SP]);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -276,5 +305,7 @@ int main(void) {
     RUN_TEST(test_sob_decrements_and_loops_until_the_register_is_zero);
     RUN_TEST(test_jsr_pushes_the_register_and_saves_the_return_address);
     RUN_TEST(test_sec_sets_and_clc_clears_the_carry_flag);
+    RUN_TEST(test_trap_pushes_psw_then_pc_and_vectors_through_034);
+    RUN_TEST(test_rti_pops_pc_then_psw);
     return UNITY_END();
 }
