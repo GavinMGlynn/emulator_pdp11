@@ -449,7 +449,7 @@ static void io_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
     bool is_par;
     int idx;
     switch (a) {
-    case IOPAGE_PSW:  put_psw(cpu, value); return;
+    case IOPAGE_PSW:  put_psw(cpu, value); cpu->cc_frozen = true; return;
     case IOPAGE_PIRQ: put_pirq(cpu, value); return;
     case 0177572u:    cpu->mmr0 = value; return;
     case 0172516u:    cpu->mmr3 = value; return;
@@ -582,6 +582,9 @@ static void write_operand(pdp11_cpu *cpu, operand op, bool bytemode,
 
 // --- Condition codes --------------------------------------------------------
 static void set_flag(pdp11_cpu *cpu, uint16_t flag, bool on) {
+    if (cpu->cc_frozen) { // an explicit PSW write already set the codes
+        return;
+    }
     if (on) {
         cpu->psw |= flag;
     } else {
@@ -1756,6 +1759,7 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
         return;
     }
     cpu->abort_depth = 0;
+    cpu->cc_frozen = false; // fresh for this instruction
 
     uint16_t word = fetch(cpu);
     uint8_t top = (uint8_t)((word >> 12) & 017u);

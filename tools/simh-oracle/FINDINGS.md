@@ -80,6 +80,17 @@ only sets PSW<7:5>); unit-tested. This advances the divergence (a second, cascad
 Z-flag difference in the idle/swtch loop remains — likely interrupt/clock-timing
 related — the next target).
 
+**P7c bug #3 — PSW-write clobbers its own condition codes (2026-07-25).** After
+SPL, the next divergence was at the very first idle/`swtch` iteration:
+`MOV (SP)+, @#177776` restores a saved PSW, but our MOV then recomputed Z from the
+value (nonzero → Z=0), clobbering the written Z bit. On the 11/70 (and SimH) an
+explicit PSW store is the last operation and its condition codes win. Fixed with a
+per-instruction `cc_frozen` flag: writing the PSW via 0177776 freezes the codes so
+the instruction's own N/Z/V/C update is skipped. (This is why the register fuzzer
+missed it — it always overwrites the PSW with the *next* instruction's codes.)
+With the fix the first 65000 kernel instructions now match SimH in PC+SP+PSW; the
+boot divergence advanced again.
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|

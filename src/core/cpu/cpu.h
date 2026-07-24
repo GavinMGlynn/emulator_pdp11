@@ -36,6 +36,11 @@ typedef struct pdp11_cpu {
     bool halted;   // set by HALT until the next reset
     bool waiting;  // set by WAIT; cleared when an interrupt is granted
     bool trace_pending; // a T-bit trace trap is due before the next instruction
+    // Set when an instruction writes the PSW as its destination (via 0177776):
+    // the written value defines the condition codes, so the instruction's own
+    // CC update is suppressed for the rest of that instruction (matches SimH,
+    // where the explicit PSW store is the last operation and wins).
+    bool cc_frozen;
     uint16_t pirq; // program interrupt request register (0177772)
 
     // Device interrupts (P6). int_req is a bit per interrupting device (see the

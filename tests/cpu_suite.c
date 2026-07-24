@@ -168,6 +168,16 @@ static void test_sbc_of_the_most_negative_value_sets_v_only_with_carry_in(void) 
     TEST_ASSERT_TRUE(cpu->psw & PDP11_PSW_V);
 }
 
+static void test_writing_the_psw_via_177776_keeps_the_written_condition_codes(void) {
+    // MOV #4, @#177776 loads the PSW with Z set. The MOV would normally recompute
+    // Z=0 (value 4 != 0), but an explicit PSW store wins — the codes come from the
+    // data written (matches SimH; the V6 idle loop restores the PSW this way).
+    const uint16_t prog[] = {0012737u, 0000004u, 0177776u}; // MOV #4, @#177776
+    deposit(001000, prog, 3);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0000004u, cpu->psw); // Z preserved, not clobbered
+}
+
 static void test_spl_sets_the_processor_priority_in_kernel_mode(void) {
     // SPL 6 (0002346) in Kernel mode sets PSW<7:5> = 6. The V6 idle loop relies
     // on this to mask interrupts while scanning the process table.
@@ -951,6 +961,7 @@ int main(void) {
     RUN_TEST(test_cmp_sets_carry_as_borrow_when_source_is_below_destination);
     RUN_TEST(test_sub_subtracts_source_from_destination);
     RUN_TEST(test_sbc_of_the_most_negative_value_sets_v_only_with_carry_in);
+    RUN_TEST(test_writing_the_psw_via_177776_keeps_the_written_condition_codes);
     RUN_TEST(test_spl_sets_the_processor_priority_in_kernel_mode);
     RUN_TEST(test_neg_of_the_most_negative_value_sets_overflow);
     RUN_TEST(test_movb_into_a_register_sign_extends_the_byte);

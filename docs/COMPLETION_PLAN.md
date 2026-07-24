@@ -269,8 +269,13 @@ real-output check) are exercised there.
     `main()`/`binit` gap: the first divergence was `SPL 6` (000230-000237), which
     our decoder silently no-op'd, leaving the CPU priority wrong. Implemented SPL
     (kernel-mode sets PSW<7:5>), unit-tested. A second cascaded divergence (a
-    Z-flag in the idle/`swtch` loop, likely interrupt/clock-timing) remains and is
-    the next target.
+    Z-flag in the idle/`swtch` loop) remains and is the next target.
+  - **Bug #3 found + fixed — PSW write clobbers its own CC.** `MOV (SP)+, @#177776`
+    (restore PSW) had our MOV recompute Z from the value afterwards, clobbering the
+    written Z bit; an explicit PSW store's codes must win (11/70/SimH). Fixed via a
+    per-instruction `cc_frozen` flag (a PSW write through 0177776 suppresses the
+    instruction's own CC update); unit-tested. First 65000 kernel instructions now
+    match SimH in PC+SP+PSW; the divergence advanced further — hunt continues.
 - *Verify:* console TTY stream diffed vs SimH booting the same image **[A]/[C]**.
 
 ## P8 — Interactive SDL3 frontend
