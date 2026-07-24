@@ -752,7 +752,9 @@ static void single_op(pdp11_cpu *cpu, uint16_t word, uint16_t base,
         uint16_t c = flag_set(cpu, PDP11_PSW_C) ? 1u : 0u;
         result = (uint16_t)((d - c) & mask);
         set_nz(cpu, result, bytemode);
-        set_flag(cpu, PDP11_PSW_V, (d & mask) == msb);
+        // Overflow only when a borrow actually flips 0100000 -> 0077777; with no
+        // carry in there is no subtraction and thus no overflow (SimH pdp11_cpu).
+        set_flag(cpu, PDP11_PSW_V, c && (d & mask) == msb);
         set_flag(cpu, PDP11_PSW_C, c && (d & mask) == 0u);
         break;
     }

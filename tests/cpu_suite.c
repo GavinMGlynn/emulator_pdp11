@@ -148,6 +148,26 @@ static void test_sub_subtracts_source_from_destination(void) {
     TEST_ASSERT_FALSE(cpu->psw & PDP11_PSW_C); // no borrow
 }
 
+static void test_sbc_of_the_most_negative_value_sets_v_only_with_carry_in(void) {
+    // SBC R0 with R0 = 0100000. With C clear there is no subtraction, so no
+    // overflow (V=0); the differential fuzzer caught us setting V unconditionally.
+    cpu->r[PDP11_R0] = 0100000u;
+    cpu->psw = 0; // C clear
+    const uint16_t sbc[] = {0005600u}; // SBC R0
+    run1(sbc, 1);
+    TEST_ASSERT_EQUAL_HEX16(0100000u, cpu->r[PDP11_R0]); // unchanged (dst - 0)
+    TEST_ASSERT_FALSE(cpu->psw & PDP11_PSW_V);
+    TEST_ASSERT_TRUE(cpu->psw & PDP11_PSW_N);
+    // With C set, subtracting 1 from 0100000 does overflow -> V set.
+    pdp11_cpu_reset(cpu);
+    cpu->r[PDP11_R0] = 0100000u;
+    cpu->psw = PDP11_PSW_C;
+    cpu->r[PDP11_PC] = 001000;
+    run1(sbc, 1);
+    TEST_ASSERT_EQUAL_HEX16(0077777u, cpu->r[PDP11_R0]);
+    TEST_ASSERT_TRUE(cpu->psw & PDP11_PSW_V);
+}
+
 static void test_neg_of_the_most_negative_value_sets_overflow(void) {
     // NEG 0100000 has no positive representation -> V set, result unchanged.
     cpu->r[PDP11_R0] = 0100000u;
@@ -915,6 +935,7 @@ int main(void) {
     RUN_TEST(test_halt_stops_execution_and_latches_the_halted_flag);
     RUN_TEST(test_cmp_sets_carry_as_borrow_when_source_is_below_destination);
     RUN_TEST(test_sub_subtracts_source_from_destination);
+    RUN_TEST(test_sbc_of_the_most_negative_value_sets_v_only_with_carry_in);
     RUN_TEST(test_neg_of_the_most_negative_value_sets_overflow);
     RUN_TEST(test_movb_into_a_register_sign_extends_the_byte);
     RUN_TEST(test_movb_to_a_register_of_a_positive_byte_clears_the_high_byte);

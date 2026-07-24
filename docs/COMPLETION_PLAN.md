@@ -252,6 +252,13 @@ real-output check) are exercised there.
       first divergent instruction. Methodology (SimH history/breakpoint/examine +
       our `--boot-rk` boot) is established. Diff is on console *content* (SimH's
       clock is wall-clock-timed, not cycle-accurate).
+  - **Tool built + first bug fixed:** a differential CPU fuzzer
+    (`tools/probes/gen_fuzz_probe.py`, golden `fuzz`) runs random register-mode
+    instructions on our core and SimH and diffs the result/PSW. It caught **SBC
+    setting V unconditionally** (SimH sets V only with a carry-in); fixed, with a
+    unit test and the seed-1 image checked in as a golden. The boot still hangs
+    after the fix, so the fuzzer needs extending to memory addressing modes to
+    find the remaining bug(s).
 - *Verify:* console TTY stream diffed vs SimH booting the same image **[A]/[C]**.
 
 ## P8 — Interactive SDL3 frontend

@@ -54,6 +54,8 @@ Status values: `open` · `confirmed` (matches oracle) · `fixed` · `divergence`
 
 | `tm11` (P6e): TM11 tape registers — MTS initial, MTC initial, write/read-back MTBRC, MTCMA, MTD | R0=01 (MTS unit-ready), R1=0200 (MTC DONE), R2=012345 (MTBRC), R3=04000 (MTCMA), R4=0123 (MTD) | SimH 11/70 identical | confirmed | TM enabled by default on the SimH pdp11. MTS reads STA_TUR (unit ready) with no tape attached. Port of pdp11_tm.c; record read/write (SimH .tap format), the file-mark→EOF status, and the BR5/vector-0224 completion interrupt are unit-tested. |
 
+| `fuzz` (P7c): differential CPU fuzzer — 120 random register-mode instructions (two-op/one-op/EIS) over edge + random operands, PSW+dst stored per case | seed 1 image byte-identical to SimH | SimH 11/70 identical | confirmed | `tools/probes/gen_fuzz_probe.py <seed>`; a sweep of seeds vs SimH caught a real bug: **SBC set V unconditionally when dst==0100000**, but SimH sets V only with a carry-in (`V = C && result==077777`). Fixed in cpu.c; seed 1 checked in as a permanent golden. (Also flushed out a fuzzer self-collision — result table overlapping code past ~48 tests — now placed at 020000.) The register-mode fuzzer is clean across seeds 1-60; the V6 boot still hangs, so the remaining bug(s) are in a memory addressing mode the fuzzer doesn't yet cover. |
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|
