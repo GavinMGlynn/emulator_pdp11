@@ -1,0 +1,10 @@
+# First-slice probe: R0 = 1 + 2 = 3, then HALT.
+# Exercises MOV #imm, ADD #imm, immediate addressing, and HALT.
+pc 001000
+w 001000 012700   # MOV #1, R0
+w 001002 000001
+w 001004 062700   # ADD #2, R0
+w 001006 000002
+w 001010 000000   # HALT
+run 100
+dump 001000 5

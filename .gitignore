@@ -1,0 +1,23 @@
+# Build trees (preset binaryDir = build/<preset>)
+/build/
+
+# User-supplied media & downloaded software — never committed
+# (see docs/references/TEST_SOFTWARE.md). Large and license-bound.
+/images/
+/roms/
+*.dsk
+*.rk05
+*.rp06
+*.tap
+*.tape
+
+# Editor / OS cruft
+.cache/
+compile_commands.json
+*.o
+*.a
+*.swp
+.DS_Store
+
+# Local Claude Code settings
+.claude/settings.local.json

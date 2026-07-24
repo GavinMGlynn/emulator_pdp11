@@ -1,0 +1,57 @@
+name: ci
+
+# The probe/golden regression is emulated architectural state, so it must be
+# bit-identical on every platform and build type. A platform where a golden
+# differs has a real bug (UB, width assumptions). We build and test both the
+# debug (-O0) and release presets. Only ext/unity is needed — the checked-in
+# goldens mean CI needs neither SimH nor copyrighted media.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: git submodule update --init ext/unity
+      - run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build python3
+      - run: cmake --preset linux-ci    && cmake --build --preset linux-ci
+      - run: ctest --preset linux-ci    --output-on-failure
+      - run: cmake --preset linux-release && cmake --build --preset linux-release
+      - run: ctest --preset linux-release --output-on-failure
+
+  rocky:
+    runs-on: ubuntu-latest
+    container: rockylinux:9
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          dnf install -y dnf-plugins-core
+          dnf config-manager --set-enabled crb
+          dnf install -y clang cmake ninja-build git python3
+      - run: git submodule update --init ext/unity
+      - run: cmake --preset linux-ci && cmake --build --preset linux-ci
+      - run: ctest --preset linux-ci --output-on-failure
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: git submodule update --init ext/unity
+      - run: brew install ninja
+      - run: cmake --preset macos-ci     && cmake --build --preset macos-ci
+      - run: ctest --preset macos-ci     --output-on-failure
+      - run: cmake --preset macos-release && cmake --build --preset macos-release
+      - run: ctest --preset macos-release --output-on-failure
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: git submodule update --init ext/unity
+      - uses: ilammy/msvc-dev-cmd@v1
+      - run: choco install ninja -y
+      - run: cmake --preset windows-ci && cmake --build --preset windows-ci
+      - run: ctest --preset windows-ci --output-on-failure

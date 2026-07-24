@@ -1,0 +1,6 @@
+[submodule "ext/unity"]
+	path = ext/unity
+	url = https://github.com/ThrowTheSwitch/Unity.git
+[submodule "ext/simh"]
+	path = ext/simh
+	url = https://github.com/open-simh/simh.git
