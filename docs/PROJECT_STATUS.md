@@ -24,10 +24,10 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | Subsystem | Status | Verified by |
 |-----------|--------|-------------|
 | Build / CI / oracle harness | **working** (P0) | CTest green on debug+release; golden vs SimH |
-| CPU integer core | **seed only** | MOV/ADD/HALT + all addressing modes; unit + 1 golden |
-| CPU full instruction set | not started | — |
-| EIS (MUL/DIV/ASH/ASHC) | not started | — |
-| Traps / interrupts / PIRQ | not started | — |
+| CPU single/double-operand set | **working** (P1a) | 90-instr `alu` battery byte-identical to SimH; 18 unit tests |
+| CPU branches / JMP / JSR / RTS / SOB | not started (P1b) | — |
+| EIS (MUL/DIV/ASH/ASHC) | not started (P2) | — |
+| Traps / interrupts / PIRQ | not started (P2) | — |
 | MMU (KT11, 22-bit, I/D) | not started | — |
 | Cache + Unibus/Massbus timing | not started | — (the cycle-accuracy core) |
 | FP11-C floating point | not started | — |
@@ -37,13 +37,16 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | Verified fast mode | not started | — |
 | Other models (11/20…11/94) | not started | — |
 
-### CPU seed — what actually works today
+### CPU — what actually works today
 - General registers R0–R7, PSW condition codes (N Z V C) and T bit.
 - All eight addressing modes incl. deferred, and the PC-relative / immediate /
   absolute forms of modes 2/3/6/7.
-- Instructions: `MOV`, `ADD`, `HALT`. Unimplemented opcodes are currently
-  no-ops (a real reserved-instruction trap arrives with P2).
-- Runs unmapped in the low 16-bit address space (MMU is P3).
+- **Full single- and double-operand instruction set (word + byte):**
+  MOV/CMP/BIT/BIC/BIS/ADD/SUB and MOVB/CMPB/BITB/BICB/BISB; CLR/COM/INC/DEC/
+  NEG/TST/ADC/SBC/ROR/ROL/ASR/ASL/SWAB/SXT and their byte forms — all condition
+  codes verified byte-identical to SimH over the `alu` battery.
+- Still no-ops until later phases: branches, JMP/JSR/RTS/SOB (P1b); traps, EIS,
+  cc-ops, MARK/MTPS/MFP* (P2); FP11 (P5). MMU is P3 (runs unmapped, low 16-bit).
 
 ## Deliberate approximations (with reason & cost to close)
 | Approximation | Reason | Cost to close |

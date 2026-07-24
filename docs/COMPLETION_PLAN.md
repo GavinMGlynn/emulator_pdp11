@@ -18,12 +18,15 @@ Verification legend: **[A]** = architectural diff vs SimH oracle;
 - [ ] GitHub Actions 4-target matrix green. *(committed; awaiting first push)*
 
 ## P1 — CPU integer core
-- [ ] All single/double-operand instructions (CLR/COM/INC/DEC/NEG/TST/ROR/ROL/
-      ASR/ASL/SWAB/ADC/SBC/SXT; MOV/CMP/BIT/BIC/BIS/ADD/SUB; byte variants).
-- [ ] Branches (BR/BNE/BEQ/BPL/BMI/BCS/BCC/BVS/BVC/BGE/BLT/BGT/BLE/BHI/BLOS/…),
-      JMP, JSR/RTS, SOB, MARK, condition-code ops (SEx/CLx).
-- [ ] Byte-to-register sign-extension quirk; odd-address & reserved-mode handling.
-- *Verify:* instruction-matrix probes **[A]**; per-instruction cycle goldens **[T]**.
+- [x] **P1a** All single/double-operand instructions (CLR/COM/INC/DEC/NEG/TST/
+      ROR/ROL/ASR/ASL/SWAB/ADC/SBC/SXT; MOV/CMP/BIT/BIC/BIS/ADD/SUB; byte
+      variants) incl. the byte-to-register sign-extension quirk. **[A]** `alu`
+      battery byte-identical to SimH + 18 unit tests.
+- [ ] **P1b** Branches (BR/BNE/BEQ/BPL/BMI/BCS/BCC/BVS/BVC/BGE/BLT/BGT/BLE/BHI/
+      BLOS/…), JMP, JSR/RTS, SOB, condition-code ops (SEx/CLx).
+- [ ] **P1c** Odd-address & reserved-mode handling (needs the P2 trap mechanism).
+- *Verify:* instruction-matrix probes **[A]**. Per-instruction cycle goldens
+  **[T]** are deferred to P4 (they need the `tick()`/cache timing model).
 
 ## P2 — Traps, interrupts, EIS
 - [ ] Trap vectors (4 bus/illegal, 10 reserved, 14 BPT, 20 IOT, 30 EMT, 34 TRAP),

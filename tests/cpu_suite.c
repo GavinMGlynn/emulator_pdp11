@@ -117,6 +117,86 @@ static void test_halt_stops_execution_and_latches_the_halted_flag(void) {
     TEST_ASSERT_EQUAL_HEX16(0u, cpu->r[PDP11_R0]);
 }
 
+// Run a one- or two-word instruction loaded at 001000 and stop.
+static void run1(const uint16_t *prog, size_t n) {
+    deposit(001000, prog, n);
+    pdp11_cpu_step(cpu);
+}
+
+static void test_cmp_sets_carry_as_borrow_when_source_is_below_destination(void) {
+    // CMP R0,R1 computes R0 - R1. With R0<R1 (unsigned) there is a borrow -> C=1.
+    cpu->r[PDP11_R0] = 0000001u;
+    cpu->r[PDP11_R1] = 0000002u;
+    const uint16_t prog[] = {0020001u}; // CMP R0, R1
+    run1(prog, 1);
+    TEST_ASSERT_TRUE(cpu->psw & PDP11_PSW_C);  // borrow
+    TEST_ASSERT_TRUE(cpu->psw & PDP11_PSW_N);  // 1-2 = -1
+    TEST_ASSERT_EQUAL_HEX16(0000001u, cpu->r[PDP11_R0]); // CMP does not store
+}
+
+static void test_sub_subtracts_source_from_destination(void) {
+    // SUB R0,R1 computes R1 = R1 - R0 (opposite operand order to CMP).
+    cpu->r[PDP11_R0] = 0000003u;
+    cpu->r[PDP11_R1] = 0000010u;
+    const uint16_t prog[] = {0160001u}; // SUB R0, R1
+    run1(prog, 1);
+    TEST_ASSERT_EQUAL_HEX16(0000005u, cpu->r[PDP11_R1]);
+    TEST_ASSERT_FALSE(cpu->psw & PDP11_PSW_C); // no borrow
+}
+
+static void test_neg_of_the_most_negative_value_sets_overflow(void) {
+    // NEG 0100000 has no positive representation -> V set, result unchanged.
+    cpu->r[PDP11_R0] = 0100000u;
+    const uint16_t prog[] = {0005400u}; // NEG R0
+    run1(prog, 1);
+    TEST_ASSERT_EQUAL_HEX16(0100000u, cpu->r[PDP11_R0]);
+    TEST_ASSERT_TRUE(cpu->psw & PDP11_PSW_V);
+    TEST_ASSERT_TRUE(cpu->psw & PDP11_PSW_C);
+}
+
+static void test_movb_into_a_register_sign_extends_the_byte(void) {
+    // MOVB #0200,R0-equivalent: put 0377 low byte source -> sign-extend to -1.
+    cpu->r[PDP11_R1] = 0000377u;       // low byte 0377 (bit 7 set)
+    const uint16_t prog[] = {0110100u}; // MOVB R1, R0
+    run1(prog, 1);
+    TEST_ASSERT_EQUAL_HEX16(0177777u, cpu->r[PDP11_R0]); // sign-extended
+    TEST_ASSERT_TRUE(cpu->psw & PDP11_PSW_N);
+}
+
+static void test_movb_to_a_register_of_a_positive_byte_clears_the_high_byte(void) {
+    cpu->r[PDP11_R0] = 0177777u;       // dirty high byte
+    cpu->r[PDP11_R1] = 0000101u;       // 'A', bit 7 clear
+    const uint16_t prog[] = {0110100u}; // MOVB R1, R0
+    run1(prog, 1);
+    TEST_ASSERT_EQUAL_HEX16(0000101u, cpu->r[PDP11_R0]);
+}
+
+static void test_ror_rotates_bit0_into_carry_and_carry_into_bit15(void) {
+    cpu->psw |= PDP11_PSW_C;            // carry in -> becomes bit 15
+    cpu->r[PDP11_R0] = 0000001u;        // bit 0 set -> becomes new carry
+    const uint16_t prog[] = {0006000u}; // ROR R0
+    run1(prog, 1);
+    TEST_ASSERT_EQUAL_HEX16(0100000u, cpu->r[PDP11_R0]);
+    TEST_ASSERT_TRUE(cpu->psw & PDP11_PSW_C);
+}
+
+static void test_swab_swaps_the_two_bytes_of_a_word(void) {
+    cpu->r[PDP11_R0] = 0000377u;        // low byte only
+    const uint16_t prog[] = {0000300u}; // SWAB R0
+    run1(prog, 1);
+    TEST_ASSERT_EQUAL_HEX16(0177400u, cpu->r[PDP11_R0]);
+    TEST_ASSERT_TRUE(cpu->psw & PDP11_PSW_Z); // new low byte is zero
+}
+
+static void test_sxt_fills_the_destination_from_the_n_flag(void) {
+    cpu->psw |= PDP11_PSW_N;
+    cpu->r[PDP11_R0] = 0000123u;
+    const uint16_t prog[] = {0006700u}; // SXT R0
+    run1(prog, 1);
+    TEST_ASSERT_EQUAL_HEX16(0177777u, cpu->r[PDP11_R0]);
+    TEST_ASSERT_FALSE(cpu->psw & PDP11_PSW_Z);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -129,5 +209,13 @@ int main(void) {
     RUN_TEST(test_add_via_register_deferred_reads_through_the_pointer);
     RUN_TEST(test_autoincrement_advances_the_pointer_register_by_two);
     RUN_TEST(test_halt_stops_execution_and_latches_the_halted_flag);
+    RUN_TEST(test_cmp_sets_carry_as_borrow_when_source_is_below_destination);
+    RUN_TEST(test_sub_subtracts_source_from_destination);
+    RUN_TEST(test_neg_of_the_most_negative_value_sets_overflow);
+    RUN_TEST(test_movb_into_a_register_sign_extends_the_byte);
+    RUN_TEST(test_movb_to_a_register_of_a_positive_byte_clears_the_high_byte);
+    RUN_TEST(test_ror_rotates_bit0_into_carry_and_carry_into_bit15);
+    RUN_TEST(test_swab_swaps_the_two_bytes_of_a_word);
+    RUN_TEST(test_sxt_fills_the_destination_from_the_n_flag);
     return UNITY_END();
 }

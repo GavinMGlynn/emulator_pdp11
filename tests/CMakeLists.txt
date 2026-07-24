@@ -11,10 +11,12 @@ add_test(NAME cpu_suite COMMAND cpu_suite)
 # build types because it is emulated architectural state, not wall-clock timing.
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
-    add_test(NAME golden_add3
-        COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_SOURCE_DIR}/tools/regress.py
-            --headless $<TARGET_FILE:pdp11_headless>
-            --image  ${CMAKE_SOURCE_DIR}/tests/images/add3.image
-            --golden ${CMAKE_SOURCE_DIR}/tests/goldens/add3.golden)
+    foreach(probe add3 alu)
+        add_test(NAME golden_${probe}
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/regress.py
+                --headless $<TARGET_FILE:pdp11_headless>
+                --image  ${CMAKE_SOURCE_DIR}/tests/images/${probe}.image
+                --golden ${CMAKE_SOURCE_DIR}/tests/goldens/${probe}.golden)
+    endforeach()
 endif()
