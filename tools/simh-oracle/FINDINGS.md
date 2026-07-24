@@ -124,6 +124,26 @@ sizes memory, mounts root, reads inodes and `/etc/init`, and writes the superblo
 `br .` spin at 000426 (kernel jumped to zero after a user-space copy loop). That
 deeper crash is the next P7c target.
 
+**P7c divergence #6 — investigation (2026-07-25).** Characterised the post-init
+crash without a fix yet. (1) The permanent hang is `cret` (the C epilogue at
+022254-022270) restoring an **all-zero register frame and RTS-ing to PC 0** — a
+process whose saved kernel context is zero, so its first return jumps to zero;
+the machine limps through several such returns-to-0 (interrupts break the 000426
+spin) before hanging for good. (2) To localise the *first* divergence without
+fragile instruction alignment, diffed the RK disk-read sequence (ours, `RKOPS`
+env log) against SimH's (`SET RK DEBUG=OPS`): **reads #1-4 are identical**
+(blocks 0, 2, 1094, 2 — same data), then read #5 splits — ours reads block
+**107**, SimH reads block **6**. Dumping the image settles which is which: block
+107 is a real file **indirect block** (its words are the data-pointer list
+108,109,163,102,103,… and ours then reads exactly those); block 6 is an **inode
+block**. So from identical disk state the two kernels walk **different
+files/inodes** — an upstream control-flow/computation divergence (wrong inode or
+path resolved), *not* disk corruption and not a bad block-pointer extraction.
+Next: instruction-align the window between RK reads #4 and #5 (a gated SimH
+per-instruction trace, enabled only across that bracket to keep it small) to pin
+the first divergent instruction. Tools reused: `--boot-rk` + `PCTRACE`/`RKOPS`
+env logs (ours), `SET RK DEBUG=OPS` + `boot rk0; send after=N "unix\r"` (SimH).
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|
