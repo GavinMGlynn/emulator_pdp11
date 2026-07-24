@@ -356,6 +356,28 @@ static void test_an_11_70_illegal_instruction_traps_through_vector_10(void) {
     TEST_ASSERT_EQUAL_HEX16(0001600u, cpu->r[PDP11_PC]);
 }
 
+static void test_a_pirq_above_the_cpu_priority_is_granted_through_240(void) {
+    cpu->r[PDP11_SP] = 0002000u;
+    cpu->psw = 0; // priority 0
+    pdp11_mem_write_word(cpu->mem, 0240u, 0001600u); // vec -> handler
+    pdp11_mem_write_word(cpu->mem, 0242u, 0000340u); // handler PSW: priority 7
+    cpu->pirq = 0100000u; // request PIR7 (bit 15)
+    // The next step takes the interrupt before fetching an instruction.
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0001600u, cpu->r[PDP11_PC]);
+    TEST_ASSERT_EQUAL_HEX16(0000340u, cpu->psw);
+}
+
+static void test_a_pirq_at_or_below_the_cpu_priority_is_masked(void) {
+    cpu->psw = 0000340u; // priority 7
+    cpu->pirq = 0100000u; // PIR7 -> level 7, not > 7
+    const uint16_t prog[] = {0005202u}; // INC R2 runs normally
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(1u, cpu->r[PDP11_R2]);
+    TEST_ASSERT_EQUAL_HEX16(0001002u, cpu->r[PDP11_PC]); // no vectoring
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -390,5 +412,7 @@ int main(void) {
     RUN_TEST(test_the_psw_is_readable_at_its_io_page_address);
     RUN_TEST(test_a_word_write_to_an_odd_address_traps_through_vector_4);
     RUN_TEST(test_an_11_70_illegal_instruction_traps_through_vector_10);
+    RUN_TEST(test_a_pirq_above_the_cpu_priority_is_granted_through_240);
+    RUN_TEST(test_a_pirq_at_or_below_the_cpu_priority_is_masked);
     return UNITY_END();
 }

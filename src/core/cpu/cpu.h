@@ -31,6 +31,7 @@ typedef struct pdp11_cpu {
     uint16_t psw;  // processor status word
     bool halted;   // set by HALT until the next reset
     bool trace_pending; // a T-bit trace trap is due before the next instruction
+    uint16_t pirq; // program interrupt request register (0177772)
 
     // Mid-instruction fault handling. A bus/odd-address (later MMU) fault
     // longjmps to abort_env, set up at the top of each instruction, and the

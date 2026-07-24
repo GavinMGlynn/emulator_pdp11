@@ -42,8 +42,10 @@ Verification legend: **[A]** = architectural diff vs SimH oracle;
 - [x] **P2c** EIS: MUL, DIV, ASH, ASHC, XOR. **[A]** `eis` probe (14 cases,
       results + flags via the memory-mapped PSW at 0177776) byte-identical to
       SimH. (MFPS/MTPS confirmed illegal on the 11/70 — deferred to per-model P10.)
-- [ ] **P2d** 7-level BR interrupt priority + arbitration; PIRQ/PIR; RESET/WAIT;
-      MARK. Then P2b's reserved/odd-address traps close out P2.
+- [~] **P2d** Priority-gated interrupts + PIRQ (program interrupt request at
+      0177772, vector 0240) + RESET done. **[A]** `intr` probe byte-identical to
+      SimH. WAIT and MARK remain (P2d tail) to close P2. Device BR4-7 interrupts
+      join this same path at P6.
 - *Verify:* trap/interrupt probes **[A]**; EIS probes **[A]**. Timing **[T]** at P4.
 
 ## P3 — Memory management (KT11, 22-bit)

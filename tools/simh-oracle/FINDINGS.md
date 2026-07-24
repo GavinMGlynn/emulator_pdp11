@@ -20,6 +20,8 @@ Status values: `open` · `confirmed` (matches oracle) · `fixed` · `divergence`
 
 | `faults` (P2b): odd-address word write (→vec 4) and MFPS illegal instruction (→vec 10), each handler RTIs back | R0=1 R2=1 R3=1, both handlers ran and resumed | SimH 11/70 identical | confirmed | Validates the setjmp/longjmp abort path, the odd-address and reserved-instruction vectors, and RTI resumption after a mid-instruction fault. |
 
+| `intr` (P2d): PIR7 requested via PIRQ at priority 0, handler at priority 7 clears it and RTIs | R0=1 R2=1, pushed frame PC=001016 PSW=010 | SimH 11/70 identical | confirmed | Validates PIRQ encoding (put_PIRQ), the priority-gated grant (level > PSW<7:5>), and the vector-0240 dispatch. |
+
 ## Timing (DEC paper oracle) — none yet
 Timing campaigns begin at P4. Each row will cite the KB11-C manual page/table it
 derives from, since SimH cannot verify cycle counts.

@@ -16,6 +16,9 @@
 #define VEC_IOT      0020u // IOT
 #define VEC_EMT      0030u // EMT
 #define VEC_TRAP     0034u // TRAP
+#define VEC_PIRQ     0240u // program interrupt request
+
+#define IOPAGE_PIRQ 0177772u // program interrupt request register
 
 pdp11_cpu *pdp11_cpu_create(void) {
     pdp11_cpu *cpu = calloc(1, sizeof *cpu);
@@ -45,6 +48,7 @@ void pdp11_cpu_reset(pdp11_cpu *cpu) {
     cpu->psw = 0;
     cpu->halted = false;
     cpu->trace_pending = false;
+    cpu->pirq = 0;
     cpu->instr_count = 0;
 }
 
@@ -138,25 +142,46 @@ static void cpu_bus_fault(pdp11_cpu *cpu, uint16_t vector) {
     longjmp(cpu->abort_env, 1);
 }
 
+// Highest program-interrupt-request level pending (7..1), or 0 if none.
+// PIR1..PIR7 occupy PIRQ bits 9..15.
+static int highest_pir_level(uint16_t pirq) {
+    for (int level = 7; level >= 1; --level) {
+        if (pirq & (uint16_t)(1u << (level + 8))) {
+            return level;
+        }
+    }
+    return 0;
+}
+
+// PIRQ write (put_PIRQ): keep the request bits and echo the highest pending
+// level into bits 7-5 and 3-1, matching the hardware read-back.
+static void put_pirq(pdp11_cpu *cpu, uint16_t value) {
+    uint16_t req = (uint16_t)(value & 0177000u);
+    int level = highest_pir_level(req);
+    uint16_t encoded = level ? (uint16_t)((level << 5) | (level << 1)) : 0u;
+    cpu->pirq = (uint16_t)(req | encoded);
+}
+
 static uint16_t cpu_read_word(pdp11_cpu *cpu, uint32_t addr) {
     if (addr & 1u) { // a word reference to an odd address traps through vector 4
         cpu_bus_fault(cpu, VEC_BUS);
     }
-    if ((addr & 0177777u) == IOPAGE_PSW) {
-        return cpu->psw;
+    switch (addr & 0177777u) {
+    case IOPAGE_PSW:  return cpu->psw;
+    case IOPAGE_PIRQ: return cpu->pirq;
+    default:          return pdp11_mem_read_word(cpu->mem, addr);
     }
-    return pdp11_mem_read_word(cpu->mem, addr);
 }
 
 static void cpu_write_word(pdp11_cpu *cpu, uint32_t addr, uint16_t value) {
     if (addr & 1u) {
         cpu_bus_fault(cpu, VEC_BUS);
     }
-    if ((addr & 0177777u) == IOPAGE_PSW) {
-        cpu->psw = value; // T-bit write rules land with the full I/O page
-        return;
+    switch (addr & 0177777u) {
+    case IOPAGE_PSW:  cpu->psw = value; break; // T-bit rules land with full I/O
+    case IOPAGE_PIRQ: put_pirq(cpu, value); break;
+    default:          pdp11_mem_write_word(cpu->mem, addr, value); break;
     }
-    pdp11_mem_write_word(cpu->mem, addr, value);
 }
 
 // Read/write an operand at the natural width. A byte read yields 0..255; a byte
@@ -743,6 +768,8 @@ static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
         do_trap(cpu, VEC_IOT);  // IOT
     } else if (word == 0) {
         cpu->halted = true;     // HALT
+    } else if (word == 0000005) {
+        cpu->pirq = 0;          // RESET: bus INIT clears device state (+ PIRQ)
     } else if ((word & 0177700u) == 0106400u  // MTPS  (LSI-only)
                || (word & 0177700u) == 0106700u  // MFPS  (LSI-only)
                || (word & 0177000u) == 0075000u  // FIS   (not on 11/70)
@@ -764,6 +791,14 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
     if (cpu->trace_pending) {
         cpu->trace_pending = false;
         do_trap(cpu, VEC_BPT);
+        return;
+    }
+    // Hardware interrupt: grant the highest pending request whose level exceeds
+    // the current CPU priority (PSW bits 7-5). Traps outrank interrupts, so this
+    // follows the trace check. Device interrupts join this path at P6.
+    if (highest_pir_level(cpu->pirq) > (int)((cpu->psw >> 5) & 07u)) {
+        do_trap(cpu, VEC_PIRQ);
+        cpu->instr_count++;
         return;
     }
     // Arm a trace trap to fire after this instruction if T is set going in.
