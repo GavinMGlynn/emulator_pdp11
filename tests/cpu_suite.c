@@ -2,6 +2,7 @@
 // (emulator-setup-guide.md §6). Word/octal notation follows PDP-11 convention.
 #include "unity.h"
 
+#include "clk/clk.h"
 #include "cpu/cpu.h"
 
 static pdp11_cpu *cpu;
@@ -622,6 +623,45 @@ static void test_cmpf_sets_n_when_the_source_is_below_the_accumulator(void) {
     TEST_ASSERT_FALSE(cpu->fps & 0000004u); // FP Z clear (unequal)
 }
 
+static void test_kw11l_powers_up_with_the_monitor_bit_set(void) {
+    // Reading LKS right after reset returns the DONE/monitor bit (0200).
+    const uint16_t prog[] = {0013700u, 0177546u}; // MOV @#177546, R0
+    deposit(001000, prog, 2);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0000200u, cpu->r[PDP11_R0]);
+}
+
+static void test_kw11l_tick_with_interrupts_enabled_vectors_through_100(void) {
+    pdp11_mem_write_word(cpu->mem, 0000100u, 0003000u); // vector PC -> handler
+    pdp11_mem_write_word(cpu->mem, 0000102u, 0000340u); // vector PSW (priority 7)
+    cpu->r[PDP11_SP] = 0004000u;        // a real stack (0 would push onto the I/O page)
+    pdp11_clk_write(cpu, KW11L_IE);     // enable clock interrupts
+    pdp11_clk_tick(cpu);                // a tick sets DONE and requests the BR6 int
+    const uint16_t prog[] = {0010000u}; // MOV R0,R0 (would run absent an interrupt)
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0003000u, cpu->r[PDP11_PC]); // vectored to the handler
+    TEST_ASSERT_EQUAL_HEX16(0000340u, cpu->psw);         // handler PSW (priority 7)
+}
+
+static void test_kw11l_tick_without_ie_sets_done_but_does_not_interrupt(void) {
+    pdp11_mem_write_word(cpu->mem, 0000100u, 0003000u);
+    pdp11_mem_write_word(cpu->mem, 0000102u, 0000340u);
+    pdp11_clk_tick(cpu);                // IE off: a tick sets DONE only
+    const uint16_t prog[] = {0000000u}; // HALT
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_TRUE(cpu->halted);                    // ran the HALT, took no vector
+    TEST_ASSERT_TRUE(cpu->r[PDP11_PC] != 0003000u);
+    TEST_ASSERT_TRUE(cpu->clk_csr & KW11L_DONE);      // DONE set by the tick
+}
+
+static void test_kw11l_writing_zero_to_done_clears_the_monitor_bit(void) {
+    // DONE powers up set; writing a 0 to LKS clears the monitor bit.
+    pdp11_clk_write(cpu, 0);
+    TEST_ASSERT_FALSE(cpu->clk_csr & KW11L_DONE);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -676,5 +716,9 @@ int main(void) {
     RUN_TEST(test_divf_divides_two_single_floats);
     RUN_TEST(test_divf_by_zero_traps_through_the_fpe_vector);
     RUN_TEST(test_cmpf_sets_n_when_the_source_is_below_the_accumulator);
+    RUN_TEST(test_kw11l_powers_up_with_the_monitor_bit_set);
+    RUN_TEST(test_kw11l_tick_with_interrupts_enabled_vectors_through_100);
+    RUN_TEST(test_kw11l_tick_without_ie_sets_done_but_does_not_interrupt);
+    RUN_TEST(test_kw11l_writing_zero_to_done_clears_the_monitor_bit);
     return UNITY_END();
 }

@@ -44,6 +44,8 @@ Status values: `open` · `confirmed` (matches oracle) · `fixed` · `divergence`
 
 | `fpe` (P5c): DIVF by 0.0 → FPE trap; handler STST saves FEC/FEA; R0 stays 0 | mem[4100]=4 (FEC_DZRO), [4102]=01006 (FEA=DIVF addr), R0=0, R7=02006 | SimH 11/70 identical | confirmed | Validates the exception model: fpnotrap semantics (over/underflow suppressed unless enabled), FEC/FEA posting, FEA = opcode address (SimH backup_PC-2), and the FPE vector 0244 dispatch. Documented tail: the FEC_UNDFV/IUV "dirty zero" NOP is not yet posted (identical with IUV disabled). |
 
+| `clk` (P6a): KW11-L LKS register at 0177546 — read initial, set IE, try IE\|DONE, clear | R0=0200 (DONE set at power-up), R1=0100, R2=0100 (DONE not writable), R3=0 | SimH 11/70 identical | confirmed | The 11/70 has the monitor bit (SimH HAS_LTCM). Oracle caught our reset: SimH's clk_reset powers up with DONE set (`clk_csr = CSR_DONE`), which we now match. Tick→interrupt timing is *not* golden-diffed — SimH's clock is wall-clock-calibrated; verified by unit tests instead, with the 60 Hz rate a **[T]** paper-oracle number (KW11-L manual). |
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|

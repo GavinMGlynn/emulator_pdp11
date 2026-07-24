@@ -48,7 +48,9 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | FP11-C MUL/DIV/MOD/CMP | **working** (P5c) | `fparith`+`fpdbl` probes byte-identical to SimH; unit tests |
 | FP11-C conversions (LDC/STC, LDEXP/STEXP) | **working** (P5c) | `fparith` probe byte-identical to SimH |
 | FP11-C exception model (FEC/FEA, FPE trap) | **working** (P5c) | `fpe` probe (divide-by-zero → vector 0244) byte-identical to SimH; unit test |
-| Devices (KW11-L, DL11, RK, RP, TM/TU) | not started | — |
+| Device interrupt controller (BR levels/vectors) | **working** (P6a) | unit tests; exercised by the KW11-L path |
+| KW11-L line clock | **working** (P6a) | `clk` register probe byte-identical to SimH; tick→interrupt unit tests |
+| Devices (DL11, RK, RP, TM/TU) | not started (P6b–e) | — |
 | Content boot (Unix V6/V7) | not started | — |
 | Interactive SDL frontend | not started | — |
 | Verified fast mode | not started | — |

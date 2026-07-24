@@ -35,6 +35,16 @@ typedef struct pdp11_cpu {
     bool trace_pending; // a T-bit trace trap is due before the next instruction
     uint16_t pirq; // program interrupt request register (0177772)
 
+    // Device interrupts (P6). int_req is a bit per interrupting device (see the
+    // PDP11_INT_* ids); each device's BR level and vector live in a table in
+    // cpu.c. The KW11-L line clock is the first. clk_csr is its status register
+    // (LKS, 0177546); clk_tick_ns is the line-clock period in emulated ns (0
+    // disables it) and clk_next_ns is the emulated time of the next tick.
+    uint32_t int_req;
+    uint16_t clk_csr;
+    uint32_t clk_tick_ns;
+    uint64_t clk_next_ns;
+
     // KT11 memory management (P3). MMR0<0> enables relocation; MMR3<M22E>
     // selects 22-bit. The PAR/PDR file is indexed (mode<<4)|(dspace<<3)|page,
     // mode 0=Kernel 1=Super 3=User (2 unused).
@@ -87,5 +97,15 @@ void pdp11_cpu_reset(pdp11_cpu *cpu);
 // Fetch, decode, and execute exactly one instruction. A HALT sets `halted` and
 // leaves the PC past the HALT word; further steps while halted are no-ops.
 void pdp11_cpu_step(pdp11_cpu *cpu);
+
+// Device interrupt ids (bit positions in int_req). Each maps to a BR level and
+// vector in cpu.c's interrupt table.
+enum { PDP11_INT_CLK = 0 };
+
+// Raise/lower a device interrupt request. The CPU grants the highest-BR pending
+// request whose level exceeds the current PSW priority at an instruction
+// boundary, vectoring through the device's vector.
+void pdp11_set_int(pdp11_cpu *cpu, int dev);
+void pdp11_clr_int(pdp11_cpu *cpu, int dev);
 
 #endif // PDP11_CPU_H

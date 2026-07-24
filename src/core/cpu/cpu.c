@@ -2,6 +2,7 @@
 
 #include <stdlib.h>
 
+#include "clk/clk.h"
 #include "fp/fp.h"
 #include "timing/timing.h"
 
@@ -75,6 +76,12 @@ void pdp11_cpu_reset(pdp11_cpu *cpu) {
     cpu->fea = 0;
     cpu->instr_count = 0;
     cpu->time_ns = 0;
+    // KW11-L line clock: default 60 Hz line frequency (16.667 ms period). INIT
+    // clears the status register and pending device interrupts.
+    cpu->int_req = 0;
+    cpu->clk_csr = KW11L_DONE; // the monitor bit powers up set (SimH clk_reset)
+    cpu->clk_tick_ns = 1000000000u / 60u;
+    cpu->clk_next_ns = cpu->clk_tick_ns;
     pdp11_cache_reset(&cpu->cache);
 }
 
@@ -199,6 +206,34 @@ static int highest_pir_level(uint16_t pirq) {
         }
     }
     return 0;
+}
+
+// Device interrupt table: each PDP11_INT_* id maps to a BR level and vector.
+static const struct { uint8_t ipl; uint16_t vec; } int_tab[] = {
+    [PDP11_INT_CLK] = {KW11L_IPL, KW11L_VEC},
+};
+#define NUM_INT (sizeof int_tab / sizeof int_tab[0])
+
+void pdp11_set_int(pdp11_cpu *cpu, int dev) {
+    cpu->int_req |= (uint32_t)(1u << dev);
+}
+
+void pdp11_clr_int(pdp11_cpu *cpu, int dev) {
+    cpu->int_req &= ~(uint32_t)(1u << dev);
+}
+
+// The pending device interrupt with the highest BR level (ties: lowest id, i.e.
+// the earlier bit), or -1 if none is pending.
+static int highest_int(const pdp11_cpu *cpu, int *ipl_out) {
+    int best = -1, bestipl = 0;
+    for (size_t d = 0; d < NUM_INT; ++d) {
+        if ((cpu->int_req & (1u << d)) && int_tab[d].ipl > bestipl) {
+            bestipl = int_tab[d].ipl;
+            best = (int)d;
+        }
+    }
+    *ipl_out = bestipl;
+    return best;
 }
 
 // PIRQ write (put_PIRQ): keep the request bits and echo the highest pending
@@ -353,6 +388,7 @@ static uint16_t io_read(pdp11_cpu *cpu, uint16_t a) {
     case IOPAGE_PIRQ: return cpu->pirq;
     case 0177572u:    return cpu->mmr0; // MMR0
     case 0172516u:    return cpu->mmr3; // MMR3
+    case KW11L_LKS:   return pdp11_clk_read(cpu); // KW11-L line clock
     default: break;
     }
     idx = apr_index(a, &is_par);
@@ -370,6 +406,7 @@ static void io_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
     case IOPAGE_PIRQ: put_pirq(cpu, value); return;
     case 0177572u:    cpu->mmr0 = value; return;
     case 0172516u:    cpu->mmr3 = value; return;
+    case KW11L_LKS:   pdp11_clk_write(cpu, value); return; // KW11-L line clock
     default: break;
     }
     idx = apr_index(a, &is_par);
@@ -1120,7 +1157,11 @@ static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
     } else if (word == 0000001) {
         cpu->waiting = true;    // WAIT for an interrupt
     } else if (word == 0000005) {
-        cpu->pirq = 0;          // RESET: bus INIT clears device state (+ PIRQ)
+        // RESET: bus INIT clears device state (PIRQ, device interrupts, and the
+        // KW11-L status register).
+        cpu->pirq = 0;
+        cpu->int_req = 0;
+        cpu->clk_csr = KW11L_DONE; // INIT sets the monitor bit (SimH clk_reset)
     } else if ((word & 0177700u) == 0106400u  // MTPS  (LSI-only)
                || (word & 0177700u) == 0106700u  // MFPS  (LSI-only)
                || (word & 0177000u) == 0075000u  // FIS   (not on 11/70)
@@ -1583,15 +1624,36 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
     }
     // Hardware interrupt: grant the highest pending request whose level exceeds
     // the current CPU priority (PSW bits 7-5). Traps outrank interrupts, so this
-    // follows the trace check. Device interrupts join this path at P6.
-    if (highest_pir_level(cpu->pirq) > (int)((cpu->psw >> 5) & 07u)) {
-        cpu->waiting = false; // an interrupt ends the wait state
-        do_trap(cpu, VEC_PIRQ);
-        cpu->instr_count++;
-        return;
+    // follows the trace check. Both program-interrupt (PIR) and device (BR)
+    // requests compete here; a device (Unibus) request wins a tie at the same
+    // level. The granted vector's own PSW re-raises priority to mask the source.
+    {
+        int ipl = (int)((cpu->psw >> 5) & 07u);
+        int pir = highest_pir_level(cpu->pirq);
+        int devipl = 0;
+        int dev = highest_int(cpu, &devipl);
+        if (dev >= 0 && devipl > ipl && devipl >= pir) {
+            cpu->waiting = false; // an interrupt ends the wait state
+            do_trap(cpu, int_tab[dev].vec);
+            cpu->instr_count++;
+            return;
+        }
+        if (pir > ipl) {
+            cpu->waiting = false;
+            do_trap(cpu, VEC_PIRQ);
+            cpu->instr_count++;
+            return;
+        }
     }
-    // WAIT idles the processor until an interrupt arrives (checked above).
+    // WAIT idles the processor until an interrupt arrives. Advance emulated time
+    // to the next line-clock tick so the clock can break the wait (a real WAIT
+    // is released by the next interrupt); without a running clock, stay idle.
     if (cpu->waiting) {
+        if (cpu->clk_tick_ns) {
+            cpu->time_ns = cpu->clk_next_ns;
+            pdp11_clk_tick(cpu);
+            cpu->clk_next_ns += cpu->clk_tick_ns;
+        }
         return;
     }
     // Arm a trace trap to fire after this instruction if T is set going in.
@@ -1657,4 +1719,10 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
     }
     cpu->time_ns += ns;
     cpu->instr_count++;
+
+    // KW11-L line clock: tick once per line-frequency period of emulated time.
+    if (cpu->clk_tick_ns && cpu->time_ns >= cpu->clk_next_ns) {
+        pdp11_clk_tick(cpu);
+        cpu->clk_next_ns += cpu->clk_tick_ns;
+    }
 }

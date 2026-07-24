@@ -141,8 +141,20 @@ recovery) and stack-limit yellow/red.
     timing (**[T]**, FP11-C manual) is folded into the P4 timing tail.
 
 ## P6 — Devices for the Unix boot
-- [ ] KW11-L line clock; DL11 console SLU; RK11/RK05; RP04/06 via RH70;
-      TM11/TU tape for install media.
+- [x] **P6a** Device-interrupt infrastructure + KW11-L line clock. The CPU now
+      has a device-interrupt controller (`int_req` bitmask → BR level/vector
+      table; `pdp11_set_int`/`pdp11_clr_int`), granted at an instruction boundary
+      against the PSW priority and interleaved with PIR (a Unibus request wins a
+      same-level tie). The KW11-L (`src/core/clk`) models the LKS status register
+      at 0177546 with the 11/70 monitor bit (powers up set; writable IE, DONE set
+      by the tick and cleared by writing 0), and ticks once per line-frequency
+      period of emulated time (60 Hz default), requesting BR6/vector 0100 when
+      enabled. WAIT is released by the clock. **[A]** `clk` register probe
+      byte-identical to SimH; tick→interrupt path via unit tests (SimH's clock is
+      wall-clock-calibrated, so the tick *timing* can't be golden-diffed — the
+      60 Hz rate cites the KW11-L manual, a **[T]** paper-oracle number).
+- [ ] **P6b** DL11 console SLU; **P6c** RK11/RK05; **P6d** RP04/06 via RH70;
+      **P6e** TM11/TU tape for install media.
 - *Verify:* device-register probes **[A]**; XXDP/MAINDEC diagnostics pass **[C]**.
 
 ## P7 — Content boot (thermometer, not a goal)

@@ -3,6 +3,7 @@
 add_library(pdp11_core STATIC
     cpu/cpu.c
     cache/cache.c
+    clk/clk.c
     fp/fp.c
     memory/memory.c
     timing/timing.c)
