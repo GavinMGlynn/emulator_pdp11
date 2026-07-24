@@ -90,7 +90,9 @@ static void rk_transfer(pdp11_cpu *cpu, int func) {
         rk_set_error(cpu, RKER_OVR);
     }
     for (int32_t i = 0; i < wc; ++i) {
-        uint32_t mem = (ma + (uint32_t)(i * 2)) & 0777777u; // 18-bit Unibus addr
+        // The RK is an 18-bit Unibus device; its DMA address relocates through
+        // the Unibus Map to physical (identity when the map is disabled).
+        uint32_t mem = pdp11_unibus_map(cpu, ma + (uint32_t)(i * 2));
         if (func == FUNC_READ) {
             pdp11_mem_write_word(cpu->mem, mem, rk->disk[da + (uint32_t)i]);
         } else if (func == FUNC_WRITE) {

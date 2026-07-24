@@ -63,7 +63,11 @@ static const uint16_t rk_boot_rom[] = {
 
 static void console_sink(void *ctx, uint8_t ch) {
     (void)ctx;
-    putchar(ch);
+    // The DL11 transmits 8 bits; V6's console driver puts even parity in bit 7.
+    // A KSR-33/VT-style console is a 7-bit ASCII device, so strip the parity bit
+    // for display — matching SimH's default 7-bit terminal (so the boot stream
+    // diffs cleanly against the oracle).
+    putchar(ch & 0177);
     fflush(stdout);
 }
 

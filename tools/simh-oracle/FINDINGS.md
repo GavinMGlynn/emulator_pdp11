@@ -124,8 +124,13 @@ sizes memory, mounts root, reads inodes and `/etc/init`, and writes the superblo
 `br .` spin at 000426 (kernel jumped to zero after a user-space copy loop). That
 deeper crash is the next P7c target.
 
-**P7c bug #6 — the RK DMA ignores the 11/70 Unibus Map (2026-07-25, CONFIRMED,
-fix pending).** Root cause of the post-init crash, found and proven. Note: an
+**P7c bug #6 — the RK DMA ignored the 11/70 Unibus Map (2026-07-25, FIXED).**
+Root cause of the post-init crash, found and proven, then fixed: implemented the
+Unibus Map (`ub_map[32]`, registers 0170200-0170377, `pdp11_unibus_map` mirroring
+SimH `Map_Addr`) and routed RK + TM11 18-bit DMA through it when `MMR3<BME>` is
+set; unit-tested. **The V6 boot now reaches the multi-user `login:` prompt.** V6
+sends even parity in bit 7 of console output; the frontend now strips it (7-bit
+terminal, as SimH does) so the stream is `@unix\r\n\n\rlogin: `. Details below. Note: an
 earlier same-day note claimed the RK read *sequence* diverged (ours block 107 vs
 SimH block 6 at read #5) — that was a **hex-parsing error** (SimH logs lbn in
 hex; `0x6B` = 107). Corrected: our RK read/write sequence is **byte-identical to

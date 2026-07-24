@@ -816,6 +816,49 @@ static void test_rk11_write_transfers_memory_to_disk(void) {
     TEST_ASSERT_EQUAL_HEX16(040000u + 255u, rk_disk[255]);
 }
 
+// The 11/70 Unibus Map relocates an 18-bit device DMA address to physical when
+// MMR3<BME> is set. V6 needs this to place a process image where its swap DMA
+// (an 18-bit Unibus address) can reach it; without it the RK DMA reads empty
+// high memory and the boot dies. Here map page 2 (Unibus 040000-057777) to a
+// distinct physical base and confirm the RK read lands there, not at the raw
+// 18-bit address.
+static void test_the_unibus_map_relocates_rk_dma_when_bme_is_set(void) {
+    for (int i = 0; i < 4; ++i) {
+        rk_disk[i] = (uint16_t)(0100000u + (unsigned)i);
+    }
+    cpu->mmr3 = 0000040u;               // BME: Unibus Map enabled
+    cpu->ub_map[2] = 0300000u;          // page 2 -> physical base 0300000
+    pdp11_rk_attach(cpu, rk_disk, 1024);
+    pdp11_rk_write(cpu, RK_RKBA, 0040000u); // Unibus address in page 2
+    pdp11_rk_write(cpu, RK_RKDA, 0);
+    pdp11_rk_write(cpu, RK_RKWC, rk_wc(4));
+    pdp11_rk_write(cpu, RK_RKCS, (2u << 1) | 1u); // READ, GO
+    TEST_ASSERT_EQUAL_HEX16(0100000u, pdp11_mem_read_word(cpu->mem, 0300000u));
+    TEST_ASSERT_EQUAL_HEX16(0100003u, pdp11_mem_read_word(cpu->mem, 0300006u));
+    TEST_ASSERT_EQUAL_HEX16(0u, pdp11_mem_read_word(cpu->mem, 0040000u)); // raw untouched
+}
+
+// A Unibus Map register is a double-word: the low word carries physical bits
+// 15:1 (bit 0 forced even), the high word carries bits 21:16, forming a 22-bit
+// base. Program register 6 through its two I/O addresses and read it back.
+static void test_a_unibus_map_register_forms_a_22bit_even_base(void) {
+    // MOV #123457, @#170230 ; low word of reg 6 (odd bit is dropped)
+    const uint16_t lo[] = {0012737u, 0123457u, 0170230u};
+    deposit(001000, lo, 3);
+    pdp11_cpu_step(cpu);
+    // MOV #77, @#170232 ; high word of reg 6 (bits 21:16)
+    const uint16_t hi[] = {0012737u, 0000077u, 0170232u};
+    deposit(001006, hi, 3);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_UINT32(((uint32_t)077u << 16) | 0123456u, cpu->ub_map[6]);
+    // read-back through the low word returns bits 15:1
+    const uint16_t rd[] = {0013700u, 0170230u}; // MOV @#170230, R0
+    deposit(001014, rd, 2);
+    cpu->r[PDP11_PC] = 001014;
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0123456u, cpu->r[0]);
+}
+
 static void test_rk11_completion_interrupts_through_220_when_enabled(void) {
     pdp11_mem_write_word(cpu->mem, 0000220u, 0003000u); // RK vector -> handler
     pdp11_mem_write_word(cpu->mem, 0000222u, 0000340u);
@@ -1058,6 +1101,8 @@ int main(void) {
     RUN_TEST(test_rk11_write_transfers_memory_to_disk);
     RUN_TEST(test_rk11_completion_interrupts_through_220_when_enabled);
     RUN_TEST(test_a_granted_device_interrupt_is_acknowledged_and_not_restormed);
+    RUN_TEST(test_the_unibus_map_relocates_rk_dma_when_bme_is_set);
+    RUN_TEST(test_a_unibus_map_register_forms_a_22bit_even_base);
     RUN_TEST(test_rp04_read_transfers_a_sector_from_disk_to_memory);
     RUN_TEST(test_rp04_write_transfers_memory_to_disk);
     RUN_TEST(test_rp04_completion_interrupts_through_254_when_enabled);

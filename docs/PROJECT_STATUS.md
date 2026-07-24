@@ -34,6 +34,8 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | MARK | **working** (P2d) | `mark` probe byte-identical to SimH |
 | **CPU (integer) — P1+P2 COMPLETE** | **done** | 10 SimH goldens + 36 unit tests |
 | MMU relocation (KT11, 22-bit, PAR/PDR) | **working** (P3a) | `mmu` probe byte-identical to SimH; unit test |
+| Unibus Map (18-bit DMA → 22-bit physical) | **working** (P7c) | 31 registers at 0170200-0170377; RK/TM DMA relocates through it when MMR3<BME> set (mirrors SimH `Map_Addr`); unit tests; carries the V6 boot to `login:` |
+| Non-existent-memory abort (vector 4) | **working** (P7c) | relocated PA ≥ installed memory (256 KB) aborts through vector 4, matching SimH; unit test |
 | Dual register sets (PSW<11>) | **working** (P3b) | `regset` probe byte-identical to SimH; unit test |
 | MFPI/MTPI/MFPD/MTPD (previous-mode access) | **working** (P3b) | `mfp` probe byte-identical to SimH; unit test |
 | Full I/D-space separation | **working** (P3b) | `idspace` probe byte-identical to SimH; unit test |
@@ -54,7 +56,7 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | RK11/RK05 disk (DMA) | **working** (P6c) | `rk11` register probe byte-identical to SimH; DMA read/write + interrupt unit tests |
 | RP04 disk via RH70 Massbus (DMA) | **working** (P6d) | `rp11` register probe byte-identical to SimH; DMA read/write + interrupt unit tests |
 | TM11/TU10 magtape (.tap) | **working** (P6e) | `tm11` register probe byte-identical to SimH; record read/write + file-mark + interrupt unit tests |
-| Content boot (Unix V6/V7) | **kernel sizes memory, mounts root, runs init I/O** (P7a/b; P7c debugging) | headless `--boot-rk` boots V6 past `@unix`: the kernel sizes core (needs the NXM abort, bug #4), enables the clock, mounts root and does interrupt-driven RK reads of inodes+`/etc/init` and superblock writes (needs interrupt-acknowledge, bug #5). Five real CPU/bus bugs found+fixed vs SimH so far; next divergence is a wild jump to PC 0 (`br .` at 000426) deeper in init — chase via SimH trace-diff |
+| Content boot (Unix V6/V7) | **boots multi-user to `login:`** (P7a/b/c) | headless `--boot-rk` boots V6 from `@unix` all the way to the multi-user `login:` prompt — console stream `@unix\r\n\n\rlogin: ` (parity stripped) matches SimH. Required six real CPU/bus bugs found+fixed vs SimH: SBC-V, SPL, PSW-CC, NXM abort, interrupt-acknowledge, and the **Unibus Map** (bug #6) that relocates 18-bit RK/TM DMA to where V6 places process images. Next: prompt-aware input to log in as root and diff a command session |
 | Interactive SDL frontend | not started | — |
 | Verified fast mode | not started | — |
 | Other models (11/20…11/94) | not started | — |

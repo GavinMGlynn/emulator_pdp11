@@ -47,18 +47,22 @@
 #define TM_BYTE_NS 100u
 
 // ---- byte access to physical memory (tape transfers are byte streams) -------
+// The TM11 is an 18-bit Unibus device: its DMA address relocates through the
+// Unibus Map to physical (identity when the map is disabled).
 static uint8_t mem_read_byte(pdp11_cpu *cpu, uint32_t a) {
-    uint16_t w = pdp11_mem_read_word(cpu->mem, a & ~1u);
-    return (uint8_t)((a & 1u) ? (w >> 8) : (w & 0377u));
+    uint32_t pa = pdp11_unibus_map(cpu, a);
+    uint16_t w = pdp11_mem_read_word(cpu->mem, pa & ~1u);
+    return (uint8_t)((pa & 1u) ? (w >> 8) : (w & 0377u));
 }
 static void mem_write_byte(pdp11_cpu *cpu, uint32_t a, uint8_t b) {
-    uint16_t w = pdp11_mem_read_word(cpu->mem, a & ~1u);
-    if (a & 1u) {
+    uint32_t pa = pdp11_unibus_map(cpu, a);
+    uint16_t w = pdp11_mem_read_word(cpu->mem, pa & ~1u);
+    if (pa & 1u) {
         w = (uint16_t)((w & 0377u) | ((unsigned)b << 8));
     } else {
         w = (uint16_t)((w & 0177400u) | (unsigned)b);
     }
-    pdp11_mem_write_word(cpu->mem, a & ~1u, w);
+    pdp11_mem_write_word(cpu->mem, pa & ~1u, w);
 }
 
 // ---- .tap image helpers -----------------------------------------------------

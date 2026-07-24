@@ -66,6 +66,9 @@ void pdp11_cpu_reset(pdp11_cpu *cpu) {
     cpu->abort_depth = 0;
     cpu->mmr0 = 0;
     cpu->mmr3 = 0;
+    for (int i = 0; i < 32; ++i) {
+        cpu->ub_map[i] = 0;
+    }
     for (int i = 0; i < 64; ++i) {
         cpu->par[i] = 0;
         cpu->pdr[i] = 0;
@@ -317,6 +320,7 @@ static void put_psw(pdp11_cpu *cpu, uint16_t new_psw) {
 #define MMR3_SDS   0000002u // supervisor D-space enable
 #define MMR3_KDS   0000004u // kernel D-space enable
 #define MMR3_M22E  0000020u // 22-bit enable
+#define MMR3_BME   0000040u // DMA bus (Unibus) map enable
 #define PDR_ACF    0000007u // access-control field
 #define PDR_ED     0000010u // expansion direction (1 = downward)
 #define PDR_W      0000100u // written flag
@@ -399,6 +403,26 @@ static uint32_t mmu_relocate(pdp11_cpu *cpu, uint16_t va, bool is_write,
 
 static bool is_iopage(uint32_t pa) { return pa >= IOPAGE_TOP; }
 
+// Unibus Map registers: 32 double-words at 0170200-0170377.
+#define UBM_BASE   0170200u
+#define UBM_END    0170377u
+
+// Relocate an 18-bit Unibus DMA byte address to physical. Mirrors SimH Map_Addr
+// (pdp11_io.c): the top 8 KB page (31) bypasses to the I/O page; every other
+// page adds the mapping register's 22-bit base to the 13-bit offset. With the
+// map disabled the 18-bit address is already the physical address.
+uint32_t pdp11_unibus_map(const pdp11_cpu *cpu, uint32_t uba) {
+    if (!(cpu->mmr3 & MMR3_BME)) {
+        return uba & 0777777u; // 18-bit direct (no relocation)
+    }
+    uint32_t pg = (uba >> 13) & 037u;   // one of 32 8 KB pages
+    uint32_t off = uba & 017777u;       // offset within the page
+    if (pg == 037u) {                   // last page bypasses to the I/O page
+        return (IOPAGE_TOP + off) & PAMASK22;
+    }
+    return (cpu->ub_map[pg] + off) & PAMASK22;
+}
+
 // Non-existent memory: a relocated physical reference at or above installed
 // memory (and below the I/O page, which is dispatched separately) aborts
 // through vector 4, as SimH does (pdp11_cpu.c ReadW/WriteW: pa >= MEMSIZE &&
@@ -429,9 +453,34 @@ static int apr_index(uint16_t a, bool *is_par) {
     return -1;
 }
 
+// Unibus Map register access. Each register is a double-word: the low word
+// (0170200+4n) holds physical bits 15:1 (bit 0 forced even), the high word
+// (0170202+4n) holds bits 21:16. Matches SimH ubmap_rd/ubmap_wr (pdp11_io.c).
+static uint16_t ubm_read(const pdp11_cpu *cpu, uint16_t a) {
+    uint32_t off = (uint32_t)(a - UBM_BASE);
+    uint32_t pg = (off >> 2) & 037u;
+    return (off & 2u) ? (uint16_t)((cpu->ub_map[pg] >> 16) & 077u)
+                      : (uint16_t)(cpu->ub_map[pg] & 0177776u);
+}
+
+static void ubm_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
+    uint32_t off = (uint32_t)(a - UBM_BASE);
+    uint32_t pg = (off >> 2) & 037u;
+    if (off & 2u) {
+        cpu->ub_map[pg] = (cpu->ub_map[pg] & 0177777u)
+                          | (((uint32_t)value & 077u) << 16);
+    } else {
+        cpu->ub_map[pg] = (cpu->ub_map[pg] & ~0177777u) | (value & 0177776u);
+    }
+    cpu->ub_map[pg] &= 017777776u; // 22-bit even base
+}
+
 static uint16_t io_read(pdp11_cpu *cpu, uint16_t a) {
     bool is_par;
     int idx;
+    if (a >= UBM_BASE && a <= UBM_END) {
+        return ubm_read(cpu, a);
+    }
     switch (a) {
     case IOPAGE_PSW:  return cpu->psw;
     case IOPAGE_PIRQ: return cpu->pirq;
@@ -463,6 +512,10 @@ static uint16_t io_read(pdp11_cpu *cpu, uint16_t a) {
 static void io_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
     bool is_par;
     int idx;
+    if (a >= UBM_BASE && a <= UBM_END) {
+        ubm_write(cpu, a, value);
+        return;
+    }
     switch (a) {
     case IOPAGE_PSW:  put_psw(cpu, value); cpu->cc_frozen = true; return;
     case IOPAGE_PIRQ: put_pirq(cpu, value); return;

@@ -295,19 +295,24 @@ real-output check) are exercised there.
     Unit-tested. **Boot now sizes memory, mounts root, reads inodes + `/etc/init`,
     and writes the superblock** — then diverges at a wild jump to PC 0 settling into
     a `br .` spin at 000426 (kernel jumped to zero after a user copy loop).
-  - **Bug #6 found — RK DMA ignores the 11/70 Unibus Map (CONFIRMED, fix pending).**
-    Root-caused the jump-to-0: the crash is a `cret` `RTS`-ing to 0 because a
-    swapped-in process's saved context is zero. Our RK read/write sequence is
-    byte-identical to SimH through all our ops (an earlier "reads diverge" note was
-    a hex-parsing slip — SimH logs lbn in hex). The swapped-out image is already
-    zero because the process content lives in low physical memory while the RK DMA
-    reads high: V6 enables the Unibus Map (`MMR3<BME>`, =000065) and programs it
-    non-identity, so the RK's 18-bit address 0327100 must relocate (via map reg 13
-    = 0120000) to physical 0127100 — but our RK uses the 18-bit address directly.
-    This is the standing P6 Unibus-Map tail, now proven to gate the boot. **Next:**
-    implement the Unibus Map (31 double-word regs at 0170200-0170377) and route
-    Unibus-device DMA through it when `MMR3<BME>` is set (mirror SimH `Map_Addr`);
-    unit-test and re-check the boot.
+  - **Bug #6 found + fixed — RK DMA ignored the 11/70 Unibus Map.** Root-caused the
+    jump-to-0: a `cret` `RTS`-ing to 0 because a swapped-in process's saved context
+    was zero. Our RK read/write sequence is byte-identical to SimH through all our
+    ops (an earlier "reads diverge" note was a hex-parsing slip — SimH logs lbn in
+    hex). The swapped-out image was zero because process content lives in low
+    physical memory while the RK DMA reads high: V6 enables the Unibus Map
+    (`MMR3<BME>`, =000065) and programs it non-identity, so the RK's 18-bit address
+    0327100 must relocate (via map reg 13 = 0120000) to physical 0127100 — our RK
+    used the 18-bit address directly. Implemented the Unibus Map (31 double-word
+    registers at 0170200-0170377) and route RK + TM11 DMA through it when
+    `MMR3<BME>` is set (mirrors SimH `Map_Addr`); unit-tested. **The V6 boot now
+    reaches the multi-user `login:` prompt** (`@unix\r\n\n\rlogin: `). Also strip
+    console parity (V6 sends even parity in bit 7; a 7-bit terminal drops it, as
+    SimH does) so the stream matches the oracle.
+- [~] **P7d** Reach a root shell + diff a command session. The kernel is up at
+      `login:`; next is prompt-aware input injection (wait for `login: ` → send
+      `root\r`, wait for `# ` → run `ls /` etc.) and a console-stream diff against
+      `boot_v6.ini`. *Verify:* TTY stream vs SimH **[C]**.
 - *Verify:* console TTY stream diffed vs SimH booting the same image **[A]/[C]**.
 
 ## P8 — Interactive SDL3 frontend

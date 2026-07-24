@@ -120,6 +120,13 @@ typedef struct pdp11_cpu {
     // (pdp11_cpu.c ReadW/WriteW). Unix sizes core by walking it until this NXM
     // trap fires, so the value must match the oracle's `set cpu <n>k`.
     uint32_t mem_top;
+
+    // KT11 Unibus Map: 31 usable mapping registers (a 32nd slot exists but the
+    // top page bypasses to the I/O page). Each holds a 22-bit even physical
+    // base. An 18-bit Unibus DMA address is relocated to physical through this
+    // map when MMR3<BME> is set, so a device can reach core the CPU placed
+    // outside the 18-bit Unibus window. Registers live at 0170200-0170377.
+    uint32_t ub_map[32];
 } pdp11_cpu;
 
 // Allocate a CPU with its own 4 MiB physical memory (heap — the memory array is
@@ -144,5 +151,12 @@ enum { PDP11_INT_CLK = 0, PDP11_INT_TTI = 1, PDP11_INT_TTO = 2,
 // boundary, vectoring through the device's vector.
 void pdp11_set_int(pdp11_cpu *cpu, int dev);
 void pdp11_clr_int(pdp11_cpu *cpu, int dev);
+
+// Relocate an 18-bit Unibus DMA byte address to a physical address. When the
+// Unibus Map is enabled (MMR3<BME>) the address is mapped through ub_map;
+// otherwise the 18-bit address is already physical and returned unchanged.
+// A Unibus device calls this for each transferred word. (The RH70 Massbus path,
+// e.g. RP04, uses a native 22-bit address and does NOT go through here.)
+uint32_t pdp11_unibus_map(const pdp11_cpu *cpu, uint32_t uba);
 
 #endif // PDP11_CPU_H
