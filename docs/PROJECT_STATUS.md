@@ -39,7 +39,8 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | Full I/D-space separation | **working** (P3b) | `idspace` probe byte-identical to SimH; unit test |
 | **MMU (KT11) — P3 COMPLETE** | **done** | relocation, aborts, banking, MFP*, I/D space |
 | MMU access control / aborts / MMR0 status | **working** (P3c) | `mmuabort` probe byte-identical to SimH; unit test |
-| Cache + Unibus/Massbus timing | not started | — (the cycle-accuracy core) |
+| Instruction timing (KB11-C tables) | **in progress** (P4a) | timing_suite vs Handbook App. C tables |
+| Cache (hit/miss) + bus/Massbus timing | not started (P4c/d) | — |
 | FP11-C floating point | not started | — |
 | Devices (KW11-L, DL11, RK, RP, TM/TU) | not started | — |
 | Content boot (Unix V6/V7) | not started | — |

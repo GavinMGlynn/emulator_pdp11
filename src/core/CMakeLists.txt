@@ -2,7 +2,8 @@
 # Headers are included as "<subsystem>/<file>.h" from this directory root.
 add_library(pdp11_core STATIC
     cpu/cpu.c
-    memory/memory.c)
+    memory/memory.c
+    timing/timing.c)
 
 target_include_directories(pdp11_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 

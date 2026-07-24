@@ -2,6 +2,8 @@
 
 #include <stdlib.h>
 
+#include "timing/timing.h"
+
 // ---------------------------------------------------------------------------
 // Physical address mask. The 11/70 is a 22-bit machine, but until the MMU and
 // Unibus map land (COMPLETION_PLAN P3/P4) we run unmapped in the low 16-bit
@@ -65,6 +67,7 @@ void pdp11_cpu_reset(pdp11_cpu *cpu) {
         cpu->stackfile[i] = 0;
     }
     cpu->instr_count = 0;
+    cpu->time_ns = 0;
 }
 
 // CPU memory access goes through these (MMU relocation + I/O-page decode),
@@ -1189,5 +1192,6 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
         break;
     }
 
+    cpu->time_ns += pdp11_instr_timing(word).ns;
     cpu->instr_count++;
 }

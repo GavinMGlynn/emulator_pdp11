@@ -55,10 +55,11 @@ typedef struct pdp11_cpu {
     uint16_t abort_vec;
     int abort_depth; // consecutive faults in one step (red-stack runaway guard)
 
-    // Cycle accounting. The reference core will drive this from the KB11-C
-    // timing model once cache/bus timing lands (COMPLETION_PLAN P4); until then
-    // it counts executed instructions so the harness has something to diff.
+    // Accounting. instr_count is a simple executed-instruction counter;
+    // time_ns accumulates KB11-C instruction execution time in nanoseconds
+    // (all-cache-hits; the cache miss model lands at P4c).
     uint64_t instr_count;
+    uint64_t time_ns;
 
     pdp11_mem *mem;
 } pdp11_cpu;

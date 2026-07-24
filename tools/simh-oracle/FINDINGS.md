@@ -32,6 +32,7 @@ Status values: `open` · `confirmed` (matches oracle) · `fixed` · `divergence`
 
 | `idspace` (P3b): kernel D-space enabled, D page 2 -> PA 0100000 (0122222); a `(R1)` data read of VA 040000 | R0=0122222 | SimH 11/70 identical | confirmed | Validates data refs use D-space while fetches use I-space. Oracle caught a *probe* bug first: an initial value 0222222 exceeds 16 bits, which SimH's deposit rejects (stayed 0) while our loader masked it — a false divergence until the probe used a 16-bit value. |
 
-## Timing (DEC paper oracle) — none yet
-Timing campaigns begin at P4. Each row will cite the KB11-C manual page/table it
-derives from, since SimH cannot verify cycle counts.
+## Timing (DEC paper oracle)
+| Campaign | Ours | DEC source | Status | Notes |
+|----------|------|-----------|--------|-------|
+| P4a instruction timing: SRC/DST address time + Execute/Fetch time | ADD R/R=300ns; CLR (R0)=1500ns; MOV to PC=600ns; etc. | PDP-11/70 Handbook 1977-78, App. C.1.5-C.1.7 (PDF pp. 269-271) | confirmed vs tables | Times in ns (handbook us x1000). **Manual self-inconsistency found:** the ADD mode-6/6 *worked example* (C.1.3) totals 2.55 us (EF 1.35), but the *tables* give SRC .60 + DST .60 + EF 1.20 = 2.40 us. We implement the tables and treat the example as an errata. |

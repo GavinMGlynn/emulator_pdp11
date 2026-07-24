@@ -86,11 +86,18 @@ recovery) and stack-limit yellow/red.
       SimH. MMR1 (auto-inc/dec recovery) and MMR2 remain a small tail.
 - *Verify:* fault/abort + relocation probes **[A]**; MMR status **[A]**.
 
-## P4 — Cache + Unibus/Massbus timing  ← the cycle-accuracy core
-- [ ] 11/70 cache (hit/miss), the primary driver of instruction cycle counts.
-- [ ] Unibus map + NPR/BR arbitration; RH70 Massbus fast path.
-- [ ] Reference `tick()` core: one tick per processor clock, contention emergent.
-- *Verify:* cycle goldens vs KB11-C cache/bus formulas **[T]**; every number
+## P4 — Cache + timing  ← the cycle-accuracy core
+- [~] **P4a** Instruction timing model (src/core/timing): SRC/DST address time by
+      mode + Execute/Fetch time per instruction class, in ns, from the PDP-11/70
+      Handbook App. C tables; a per-instruction time accumulator (cpu->time_ns).
+      **[T]** timing_suite checks computed times against the tables (8 cases).
+- [ ] **P4b** EF times for branches, JMP/JSR/RTS, EIS (operand-dependent
+      MUL/DIV/ASH), FP11, traps.
+- [ ] **P4c** 11/70 cache (hit/miss) — add 1.02 us per read-cycle miss; model the
+      cache to derive hit/miss deterministically.
+- [ ] **P4d** Reference `tick()` core (one tick per processor clock) for emergent
+      DMA/bus contention; Unibus map + RH70 Massbus.
+- *Verify:* timing checked against KB11-C / Handbook tables **[T]**; every number
   cited in FINDINGS.md.
 
 ## P5 — FP11-C floating point
