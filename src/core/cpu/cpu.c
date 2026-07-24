@@ -532,12 +532,17 @@ static void op_branch(pdp11_cpu *cpu, uint16_t word, uint16_t hb) {
     }
 }
 
+static void do_trap(pdp11_cpu *cpu, uint16_t vector); // defined below
+
 // --- Control transfer -------------------------------------------------------
-// JMP dst: PC := effective address of dst (register mode is illegal — traps at
-// P2; ignored here). JSR/RTS use the same rule for the register-mode edge.
+// JMP dst: PC := effective address of dst. A register operand has no address, so
+// on the 11/70 (which lacks HAS_JREG4) JMP/JSR to a register is illegal and
+// traps through vector 010.
 static void op_jmp(pdp11_cpu *cpu, uint16_t word) {
     operand dst = decode_operand(cpu, (uint8_t)(word & 077u), false);
-    if (!dst.is_reg) {
+    if (dst.is_reg) {
+        do_trap(cpu, VEC_RESERVED);
+    } else {
         cpu->r[PDP11_PC] = (uint16_t)dst.addr;
     }
 }
@@ -546,7 +551,8 @@ static void op_jsr(pdp11_cpu *cpu, uint16_t word) {
     uint8_t reg = (uint8_t)((word >> 6) & 07u);
     operand dst = decode_operand(cpu, (uint8_t)(word & 077u), false);
     if (dst.is_reg) {
-        return; // illegal addressing for JSR — P2 trap
+        do_trap(cpu, VEC_RESERVED); // JSR to a register is illegal on the 11/70
+        return;
     }
     push_word(cpu, cpu->r[reg]);
     cpu->r[reg] = cpu->r[PDP11_PC];

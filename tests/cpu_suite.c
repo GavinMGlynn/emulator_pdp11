@@ -408,6 +408,16 @@ static void test_mark_restores_pc_from_r5_and_cleans_the_stack(void) {
     TEST_ASSERT_EQUAL_HEX16(0001004u, cpu->r[PDP11_SP]); // SP <- i + 2
 }
 
+static void test_jmp_to_a_register_is_illegal_on_the_11_70(void) {
+    cpu->r[PDP11_SP] = 0002000u;
+    pdp11_mem_write_word(cpu->mem, 0010u, 0001600u); // vec 10 -> handler
+    pdp11_mem_write_word(cpu->mem, 0012u, 0u);
+    const uint16_t prog[] = {0000100u}; // JMP R0 (register mode)
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0001600u, cpu->r[PDP11_PC]); // trapped to handler
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -446,5 +456,6 @@ int main(void) {
     RUN_TEST(test_a_pirq_at_or_below_the_cpu_priority_is_masked);
     RUN_TEST(test_wait_idles_until_an_interrupt_is_granted);
     RUN_TEST(test_mark_restores_pc_from_r5_and_cleans_the_stack);
+    RUN_TEST(test_jmp_to_a_register_is_illegal_on_the_11_70);
     return UNITY_END();
 }

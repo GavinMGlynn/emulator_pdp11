@@ -26,7 +26,9 @@ Verification legend: **[A]** = architectural diff vs SimH oracle;
       BLOS), JMP, JSR/RTS, SOB, condition-code ops (SEx/CLx). **[A]** `flow`
       probe (SOB loop + JSR/RTS subroutine + branches) byte-identical to SimH,
       plus a two-pass probe assembler (`tools/probes/asm.py`).
-- [ ] **P1c** Odd-address & reserved-mode handling (needs the P2 trap mechanism).
+- [x] **P1c** Odd-address handling (done in P2b) and reserved-mode handling:
+      JMP/JSR to a register is illegal on the 11/70 (no HAS_JREG4) and traps
+      through vector 010. **[A]** `jmpreg` probe byte-identical to SimH.
 - *Verify:* instruction-matrix probes **[A]**. Per-instruction cycle goldens
   **[T]** are deferred to P4 (they need the `tick()`/cache timing model).
 
