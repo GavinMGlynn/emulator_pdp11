@@ -6,6 +6,7 @@ add_library(pdp11_core STATIC
     clk/clk.c
     console/console.c
     devices/rk11.c
+    devices/rp11.c
     fp/fp.c
     memory/memory.c
     timing/timing.c)

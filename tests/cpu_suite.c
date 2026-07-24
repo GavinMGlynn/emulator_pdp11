@@ -767,6 +767,66 @@ static void test_rk11_completion_interrupts_through_220_when_enabled(void) {
     TEST_ASSERT_EQUAL_HEX16(0003000u, cpu->r[PDP11_PC]); // vectored to the handler
 }
 
+static uint16_t rp_disk[1024];
+
+static void test_rp04_read_transfers_a_sector_from_disk_to_memory(void) {
+    for (int i = 0; i < 256; ++i) {
+        rp_disk[i] = (uint16_t)(0140000u + (unsigned)i);
+    }
+    pdp11_rp_attach(cpu, rp_disk, 1024);
+    pdp11_rp_write(cpu, 0176704u, 0010000u);  // RPBA
+    pdp11_rp_write(cpu, 0176750u, 0);         // RPBAE
+    pdp11_rp_write(cpu, 0176706u, 0);         // RPDA (sector 0, track 0)
+    pdp11_rp_write(cpu, 0176734u, 0);         // RPDC (cylinder 0)
+    pdp11_rp_write(cpu, 0176702u, rk_wc(256)); // RPWC
+    pdp11_rp_write(cpu, 0176700u, (034u << 1) | 1u); // RPCS1: READ, GO
+    cpu->time_ns = cpu->rp.done_ns;
+    pdp11_rp_poll(cpu);
+    TEST_ASSERT_TRUE(cpu->rp.cs1 & 0000200u); // ready
+    TEST_ASSERT_EQUAL_HEX16(0140000u, pdp11_mem_read_word(cpu->mem, 0010000u));
+    TEST_ASSERT_EQUAL_HEX16(0140000u + 255u,
+                            pdp11_mem_read_word(cpu->mem, 0010000u + 255u * 2u));
+}
+
+static void test_rp04_write_transfers_memory_to_disk(void) {
+    for (int i = 0; i < 1024; ++i) {
+        rp_disk[i] = 0;
+    }
+    pdp11_rp_attach(cpu, rp_disk, 1024);
+    for (unsigned i = 0; i < 256; ++i) {
+        pdp11_mem_write_word(cpu->mem, 0010000u + i * 2u, (uint16_t)(050000u + i));
+    }
+    pdp11_rp_write(cpu, 0176704u, 0010000u);  // RPBA
+    pdp11_rp_write(cpu, 0176750u, 0);         // RPBAE
+    pdp11_rp_write(cpu, 0176706u, 0);         // RPDA
+    pdp11_rp_write(cpu, 0176734u, 0);         // RPDC
+    pdp11_rp_write(cpu, 0176702u, rk_wc(256)); // RPWC
+    pdp11_rp_write(cpu, 0176700u, (030u << 1) | 1u); // RPCS1: WRITE, GO
+    cpu->time_ns = cpu->rp.done_ns;
+    pdp11_rp_poll(cpu);
+    TEST_ASSERT_EQUAL_HEX16(050000u, rp_disk[0]);
+    TEST_ASSERT_EQUAL_HEX16(050000u + 255u, rp_disk[255]);
+}
+
+static void test_rp04_completion_interrupts_through_254_when_enabled(void) {
+    pdp11_mem_write_word(cpu->mem, 0000254u, 0003000u); // RP vector -> handler
+    pdp11_mem_write_word(cpu->mem, 0000256u, 0000340u);
+    cpu->r[PDP11_SP] = 0004000u;
+    pdp11_rp_attach(cpu, rp_disk, 1024);
+    pdp11_rp_write(cpu, 0176704u, 0010000u);
+    pdp11_rp_write(cpu, 0176750u, 0);
+    pdp11_rp_write(cpu, 0176706u, 0);
+    pdp11_rp_write(cpu, 0176734u, 0);
+    pdp11_rp_write(cpu, 0176702u, rk_wc(256));
+    pdp11_rp_write(cpu, 0176700u, (034u << 1) | 1u | 0000100u); // READ, GO, IE
+    cpu->time_ns = cpu->rp.done_ns;
+    pdp11_rp_poll(cpu);
+    const uint16_t prog[] = {0010000u};
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0003000u, cpu->r[PDP11_PC]); // vectored to handler
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -831,5 +891,8 @@ int main(void) {
     RUN_TEST(test_rk11_read_transfers_a_sector_from_disk_to_memory);
     RUN_TEST(test_rk11_write_transfers_memory_to_disk);
     RUN_TEST(test_rk11_completion_interrupts_through_220_when_enabled);
+    RUN_TEST(test_rp04_read_transfers_a_sector_from_disk_to_memory);
+    RUN_TEST(test_rp04_write_transfers_memory_to_disk);
+    RUN_TEST(test_rp04_completion_interrupts_through_254_when_enabled);
     return UNITY_END();
 }

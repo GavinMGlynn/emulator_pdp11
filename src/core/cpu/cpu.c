@@ -5,6 +5,7 @@
 #include "clk/clk.h"
 #include "console/console.h"
 #include "devices/rk11.h"
+#include "devices/rp11.h"
 #include "fp/fp.h"
 #include "timing/timing.h"
 
@@ -100,6 +101,11 @@ void pdp11_cpu_reset(pdp11_cpu *cpu) {
     cpu->rk.rkda = 0;
     cpu->rk.rkds = 0;
     cpu->rk.busy = false;
+    // RH70 + RP04: registers to reset; CS1 ready. Disk buffer preserved.
+    cpu->rp.cs1 = 0000200u; // CS1_DONE
+    cpu->rp.wc = cpu->rp.ba = cpu->rp.cs2 = cpu->rp.bae = 0;
+    cpu->rp.da = cpu->rp.dc = cpu->rp.cc = cpu->rp.ds = cpu->rp.er1 = 0;
+    cpu->rp.busy = false;
     pdp11_cache_reset(&cpu->cache);
 }
 
@@ -232,6 +238,7 @@ static const struct { uint8_t ipl; uint16_t vec; } int_tab[] = {
     [PDP11_INT_TTI] = {DL11_IPL, DL11_RVEC},
     [PDP11_INT_TTO] = {DL11_IPL, DL11_XVEC},
     [PDP11_INT_RK] = {RK_IPL, RK_VEC},
+    [PDP11_INT_RP] = {RP_IPL, RP_VEC},
 };
 #define NUM_INT (sizeof int_tab / sizeof int_tab[0])
 
@@ -416,7 +423,11 @@ static uint16_t io_read(pdp11_cpu *cpu, uint16_t a) {
     case RK_RKDS: case RK_RKER: case RK_RKCS: case RK_RKWC:
     case RK_RKBA: case RK_RKDA: case RK_RKMR: case RK_RKDB:
         return pdp11_rk_read(cpu, a); // RK11 disk
-    default: break;
+    default:
+        if (a >= RP_CSR && a <= RP_END) {
+            return pdp11_rp_read(cpu, a); // RH70 + RP04 disk
+        }
+        break;
     }
     idx = apr_index(a, &is_par);
     if (idx >= 0) {
@@ -440,7 +451,11 @@ static void io_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
     case RK_RKDS: case RK_RKER: case RK_RKCS: case RK_RKWC:
     case RK_RKBA: case RK_RKDA: case RK_RKMR: case RK_RKDB:
         pdp11_rk_write(cpu, a, value); return; // RK11 disk
-    default: break;
+    default:
+        if (a >= RP_CSR && a <= RP_END) {
+            pdp11_rp_write(cpu, a, value); return; // RH70 + RP04 disk
+        }
+        break;
     }
     idx = apr_index(a, &is_par);
     if (idx >= 0) {
@@ -1201,6 +1216,9 @@ static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
         cpu->rk.rkcs = 0000200u;   // RK11 controller ready
         cpu->rk.rker = 0;
         cpu->rk.busy = false;
+        cpu->rp.cs1 = 0000200u;    // RH70/RP04 controller ready
+        cpu->rp.er1 = 0;
+        cpu->rp.busy = false;
     } else if ((word & 0177700u) == 0106400u  // MTPS  (LSI-only)
                || (word & 0177700u) == 0106700u  // MFPS  (LSI-only)
                || (word & 0177000u) == 0075000u  // FIS   (not on 11/70)
@@ -1771,5 +1789,9 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
     // RK11: complete a scheduled disk transfer.
     if (cpu->rk.busy) {
         pdp11_rk_poll(cpu);
+    }
+    // RH70 + RP04: complete a scheduled disk transfer.
+    if (cpu->rp.busy) {
+        pdp11_rp_poll(cpu);
     }
 }

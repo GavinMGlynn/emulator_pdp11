@@ -171,8 +171,24 @@ recovery) and stack-limit yellow/red.
       completion (DONE + interrupt) is scheduled in emulated time. **[A]** `rk11`
       register probe byte-identical to SimH (RKCS/RKWC/RKBA/RKDA); the DMA
       read/write and the completion interrupt via unit tests.
-- [ ] **P6d** RP04/06 via RH70; **P6e** TM11/TU tape.
+- [x] **P6d** RP04 disk via the RH70 Massbus (`src/core/devices/rp11`): the
+      controller register window at 0176700-0176752, interrupting at BR5 through
+      vector 0254. The RH70 owns CS1/WC/BA/CS2/BAE and passes the other offsets to
+      the drive (DS/ER1/DA/DT/DC/CC) via SimH's `mba_mapofs` I/O-offset→register
+      map; RPBAE/RPCS3 (RH70-only) are handled explicitly. A read/write moves
+      whole sectors between memory (22-bit BAE:BA) and disk block GET_DA(DC,DA),
+      counting RPWC words; pack-acknowledge sets volume-valid, completion sets
+      ready + attention and interrupts. **[A]** `rp11` register probe
+      byte-identical to SimH (CS1 with the drive-available bit, WC/BA/DA/DC with
+      their MBZ masks); the DMA read/write and completion interrupt via unit tests.
+- [ ] **P6e** TM11/TU tape for install media.
 - *Verify:* device-register probes **[A]**; XXDP/MAINDEC diagnostics pass **[C]**.
+  - *Documented tails (RP/RH70):* single RP04 on drive 0; the Massbus error /
+    attention-summary / offset / ECC / diagnostic registers are minimal (read 0);
+    the RH11 `mba_mapofs` is used with RH70 BAE/CS3 bolted on; DMA uses the 22-bit
+    BAE:BA address as physical (no Unibus Map, which the RH70 bypasses anyway).
+    The attached-disk SimH memory-diff and the XXDP RP diagnostic **[C]** at P7 are
+    the end-to-end checks.
   - *Documented tails (RK11):* (1) RKDS drive status is minimal — SimH returns a
     random sector count there, so it is not modelled/probed. (2) DMA uses the
     18-bit Unibus address directly as physical; the 11/70 Unibus Map relocation

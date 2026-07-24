@@ -50,6 +50,8 @@ Status values: `open` · `confirmed` (matches oracle) · `fixed` · `divergence`
 
 | `rk11` (P6c): RK11 registers — read RKCS initial, write/read-back RKWC, RKBA, RKDA | R0=0200 (RKCS DONE), R1=012345 (RKWC), R2=04000 (RKBA), R3=01234 (RKDA) | SimH 11/70 identical | confirmed | RK enabled by default on the SimH pdp11. Deterministic R/W registers only: RKDS returns a random sector count in SimH (rand()%12) so it is not probed, and the DMA transfer needs an attached image (unit-tested instead). Port of pdp11_rk.c; the read/write sector transfer and BR5/vector-0220 completion interrupt are covered by cpu_suite unit tests. |
 
+| `rp11` (P6d): RH70/RP04 registers — RPCS1 initial, write/read-back RPWC, RPBA, RPDA, RPDC | R0=04200 (CS1 DONE+DVA), R1=012345, R2=04000, R3=012045 (RPDA & 037477), R4=01234 (RPDC & 01777) | SimH 11/70 identical | confirmed | Register access goes through SimH's mba_mapofs (I/O offset → RH-internal or drive register); RH70 BAE/CS3 bolted on. Oracle caught the CS1 drive-available bit (04000) we initially omitted, and the RPDA/RPDC MBZ masks (0140300 / 0176000). DMA read/write and the BR5/vector-0254 completion interrupt are unit-tested. |
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|
