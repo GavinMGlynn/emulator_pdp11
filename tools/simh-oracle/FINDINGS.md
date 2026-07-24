@@ -124,25 +124,42 @@ sizes memory, mounts root, reads inodes and `/etc/init`, and writes the superblo
 `br .` spin at 000426 (kernel jumped to zero after a user-space copy loop). That
 deeper crash is the next P7c target.
 
-**P7c divergence #6 — investigation (2026-07-25).** Characterised the post-init
-crash without a fix yet. (1) The permanent hang is `cret` (the C epilogue at
-022254-022270) restoring an **all-zero register frame and RTS-ing to PC 0** — a
-process whose saved kernel context is zero, so its first return jumps to zero;
-the machine limps through several such returns-to-0 (interrupts break the 000426
-spin) before hanging for good. (2) To localise the *first* divergence without
-fragile instruction alignment, diffed the RK disk-read sequence (ours, `RKOPS`
-env log) against SimH's (`SET RK DEBUG=OPS`): **reads #1-4 are identical**
-(blocks 0, 2, 1094, 2 — same data), then read #5 splits — ours reads block
-**107**, SimH reads block **6**. Dumping the image settles which is which: block
-107 is a real file **indirect block** (its words are the data-pointer list
-108,109,163,102,103,… and ours then reads exactly those); block 6 is an **inode
-block**. So from identical disk state the two kernels walk **different
-files/inodes** — an upstream control-flow/computation divergence (wrong inode or
-path resolved), *not* disk corruption and not a bad block-pointer extraction.
-Next: instruction-align the window between RK reads #4 and #5 (a gated SimH
-per-instruction trace, enabled only across that bracket to keep it small) to pin
-the first divergent instruction. Tools reused: `--boot-rk` + `PCTRACE`/`RKOPS`
-env logs (ours), `SET RK DEBUG=OPS` + `boot rk0; send after=N "unix\r"` (SimH).
+**P7c bug #6 — the RK DMA ignores the 11/70 Unibus Map (2026-07-25, CONFIRMED,
+fix pending).** Root cause of the post-init crash, found and proven. Note: an
+earlier same-day note claimed the RK read *sequence* diverged (ours block 107 vs
+SimH block 6 at read #5) — that was a **hex-parsing error** (SimH logs lbn in
+hex; `0x6B` = 107). Corrected: our RK read/write sequence is **byte-identical to
+SimH through all 131 of our ops**, including the process swap. Ours then hangs
+where SimH continues.
+
+Localisation. The permanent hang is `cret` (022254-022270) `RTS`-ing to PC 0
+because the resumed process's saved kernel context is zero. That context comes
+from a **process swap**: ops #128-131 write core → disk blocks 4000/4004
+(swap-out) then read them back to a new core location (swap-in). Dumping the
+swap data (`SWAPDUMP`) shows the swap-out **source is already all zeros**, so the
+DMA is faithful — the process image simply is not where the DMA looks. Logging
+every physical write ≥ 64 KB (`PAWRITE`) shows the CPU MMU only ever *zero-fills*
+high memory (the sizing probe / `clearseg`); **no real process content is ever
+written above 64 KB** — the image lives in low physical memory.
+
+The cause (`UBMLOG`). V6 sets **MMR3 = 000065**: `BME` (Unibus Map enable, bit 5)
+*and* `M22E` (22-bit, bit 4) both on, then programs the 31 Unibus Map registers
+(0170200-0170377) **non-identity** — e.g. register 13 (0170264) = 0120000. The RK
+is an 18-bit Unibus device: its DMA address 0327100 (segment 13 = bits 17-13)
+relocates through the map to physical `0120000 + (0327100 & 017777)` = **0127100**
+(low memory, where the process image really is). SimH applies the map (`Map_Addr`,
+pdp11_io.c) and reads the right image; **our RK uses the 18-bit address directly**
+(`rk11.c` `mem = (ma + i*2) & 0777777`) and reads physical 0327100 (high, empty →
+zeros), so the swapped-in context is zero → `RTS` to 0. This is the standing P6
+"Unibus Map for >256 KB DMA" tail, now proven to gate the V6 boot.
+
+Fix (next iteration): implement the KT11/RH70 Unibus Map — 31 double-word mapping
+registers at 0170200-0170377, and relocate every Unibus-device DMA (`rk`, `tm`,
+and the 18-bit RP path) through it when `MMR3<BME>` is set: physical = map[UBaddr
+17:13] + (UBaddr & 017777), with the top segment (31) bypassing to the I/O page.
+Mirror SimH `Map_Addr`. Unit-test the relocation and re-check the boot. Tools:
+`--boot-rk` + `PCTRACE`/`RKGO`/`SWAPDUMP`/`PAWRITE`/`UBMLOG` env logs (ours),
+`SET RK DEBUG=OPS` (SimH).
 
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
