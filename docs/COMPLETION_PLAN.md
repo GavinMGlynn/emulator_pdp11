@@ -162,8 +162,26 @@ recovery) and stack-limit yellow/red.
       byte-identical to SimH (CSR IMP/RW masks, reset states); input/output and
       the receiver/transmitter interrupts via unit tests (the transmit-busy timing
       is wall-clock-calibrated in SimH, so it is not golden-diffed).
-- [ ] **P6c** RK11/RK05; **P6d** RP04/06 via RH70; **P6e** TM11/TU tape.
+- [x] **P6c** RK11/RK05 disk (`src/core/devices/rk11`): the eight I/O-page
+      registers (RKDS/RKER/RKCS/RKWC/RKBA/RKDA + unimplemented RKMR/RKDB),
+      interrupting at BR5 through vector 0220, with the control/read/write/
+      write-check/seek/reset functions. A read/write moves whole sectors between
+      the disk image (attached via `pdp11_rk_attach`, drive 0) and physical
+      memory (18-bit Unibus address in RKBA + RKCS<5:4>), counting RKWC words;
+      completion (DONE + interrupt) is scheduled in emulated time. **[A]** `rk11`
+      register probe byte-identical to SimH (RKCS/RKWC/RKBA/RKDA); the DMA
+      read/write and the completion interrupt via unit tests.
+- [ ] **P6d** RP04/06 via RH70; **P6e** TM11/TU tape.
 - *Verify:* device-register probes **[A]**; XXDP/MAINDEC diagnostics pass **[C]**.
+  - *Documented tails (RK11):* (1) RKDS drive status is minimal — SimH returns a
+    random sector count there, so it is not modelled/probed. (2) DMA uses the
+    18-bit Unibus address directly as physical; the 11/70 Unibus Map relocation
+    (for DMA above 256 KB) is a P6 infra tail. (3) Only drive 0 and the
+    controller interrupt are modelled — the per-drive overlapped-seek interrupt
+    queue is deferred. (4) The strongest check — a disk image attached in both
+    SimH and our headless with the transferred memory diffed — awaits the oracle
+    disk-attach harness; today the DMA is unit-tested and will be exercised end to
+    end by the XXDP RK diagnostic **[C]** at P7.
   - *Documented tail (interrupt model):* our interrupt grant dispatches and ends
     the step, re-checking interrupts before the handler's first instruction runs.
     With a normal handler (whose vector PSW raises priority to the device level or

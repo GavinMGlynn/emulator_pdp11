@@ -4,6 +4,7 @@
 
 #include "clk/clk.h"
 #include "console/console.h"
+#include "devices/rk11.h"
 #include "fp/fp.h"
 #include "timing/timing.h"
 
@@ -90,6 +91,15 @@ void pdp11_cpu_reset(pdp11_cpu *cpu) {
     cpu->tto_csr = DL11_DONE;
     cpu->tto_buf = 0;
     cpu->tto_busy = false;
+    // RK11: registers to their reset state; DONE ready. The attached disk buffer
+    // (set by the frontend) is preserved across reset.
+    cpu->rk.rkcs = 0000200u; // RKCS_DONE
+    cpu->rk.rker = 0;
+    cpu->rk.rkwc = 0;
+    cpu->rk.rkba = 0;
+    cpu->rk.rkda = 0;
+    cpu->rk.rkds = 0;
+    cpu->rk.busy = false;
     pdp11_cache_reset(&cpu->cache);
 }
 
@@ -221,6 +231,7 @@ static const struct { uint8_t ipl; uint16_t vec; } int_tab[] = {
     [PDP11_INT_CLK] = {KW11L_IPL, KW11L_VEC},
     [PDP11_INT_TTI] = {DL11_IPL, DL11_RVEC},
     [PDP11_INT_TTO] = {DL11_IPL, DL11_XVEC},
+    [PDP11_INT_RK] = {RK_IPL, RK_VEC},
 };
 #define NUM_INT (sizeof int_tab / sizeof int_tab[0])
 
@@ -402,6 +413,9 @@ static uint16_t io_read(pdp11_cpu *cpu, uint16_t a) {
     case DL11_RCSR: case DL11_RBUF:
     case DL11_XCSR: case DL11_XBUF:
         return pdp11_console_read(cpu, a); // DL11 console
+    case RK_RKDS: case RK_RKER: case RK_RKCS: case RK_RKWC:
+    case RK_RKBA: case RK_RKDA: case RK_RKMR: case RK_RKDB:
+        return pdp11_rk_read(cpu, a); // RK11 disk
     default: break;
     }
     idx = apr_index(a, &is_par);
@@ -423,6 +437,9 @@ static void io_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
     case DL11_RCSR: case DL11_RBUF:
     case DL11_XCSR: case DL11_XBUF:
         pdp11_console_write(cpu, a, value); return; // DL11 console
+    case RK_RKDS: case RK_RKER: case RK_RKCS: case RK_RKWC:
+    case RK_RKBA: case RK_RKDA: case RK_RKMR: case RK_RKDB:
+        pdp11_rk_write(cpu, a, value); return; // RK11 disk
     default: break;
     }
     idx = apr_index(a, &is_par);
@@ -1181,6 +1198,9 @@ static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
         cpu->tti_csr = 0;          // DL11 receiver idle
         cpu->tto_csr = DL11_DONE;  // DL11 transmitter ready
         cpu->tto_busy = false;
+        cpu->rk.rkcs = 0000200u;   // RK11 controller ready
+        cpu->rk.rker = 0;
+        cpu->rk.busy = false;
     } else if ((word & 0177700u) == 0106400u  // MTPS  (LSI-only)
                || (word & 0177700u) == 0106700u  // MFPS  (LSI-only)
                || (word & 0177000u) == 0075000u  // FIS   (not on 11/70)
@@ -1747,5 +1767,9 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
     // DL11 transmitter: complete a pending character transmit.
     if (cpu->tto_busy) {
         pdp11_console_tx_poll(cpu);
+    }
+    // RK11: complete a scheduled disk transfer.
+    if (cpu->rk.busy) {
+        pdp11_rk_poll(cpu);
     }
 }

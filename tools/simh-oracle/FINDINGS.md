@@ -48,6 +48,8 @@ Status values: `open` · `confirmed` (matches oracle) · `fixed` · `divergence`
 
 | `dl11` (P6b): DL11 console CSRs — read RCSR/XCSR initial, set/clear IE, read back (priority 7 masks interrupts) | R0=0 (rcv idle), R1=0200 (xmt ready), R2=0100, R3=0300, R4=0 | SimH 11/70 identical | confirmed | Receiver powers up idle, transmitter ready (SimH tti/tto_reset); only IE writable; reads expose DONE\|IE. The probe raises PSW to priority 7 first — the diagnosis being the finding: enabling the transmitter IE while DONE is set raises an immediate BR4 interrupt through the unset vector 064, which SimH survives (it runs the HALT at 0 before re-checking) but our grant-then-recheck model storms on. A pathological-vector edge case (documented tail); masked here so the probe tests just the CSR semantics. |
 
+| `rk11` (P6c): RK11 registers — read RKCS initial, write/read-back RKWC, RKBA, RKDA | R0=0200 (RKCS DONE), R1=012345 (RKWC), R2=04000 (RKBA), R3=01234 (RKDA) | SimH 11/70 identical | confirmed | RK enabled by default on the SimH pdp11. Deterministic R/W registers only: RKDS returns a random sector count in SimH (rand()%12) so it is not probed, and the DMA transfer needs an attached image (unit-tested instead). Port of pdp11_rk.c; the read/write sector transfer and BR5/vector-0220 completion interrupt are covered by cpu_suite unit tests. |
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|

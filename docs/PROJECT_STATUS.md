@@ -51,7 +51,8 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | Device interrupt controller (BR levels/vectors) | **working** (P6a) | unit tests; exercised by the KW11-L path |
 | KW11-L line clock | **working** (P6a) | `clk` register probe byte-identical to SimH; tick→interrupt unit tests |
 | DL11 console SLU | **working** (P6b) | `dl11` register probe byte-identical to SimH; input/output + interrupt unit tests |
-| Devices (RK, RP, TM/TU) | not started (P6c–e) | — |
+| RK11/RK05 disk (DMA) | **working** (P6c) | `rk11` register probe byte-identical to SimH; DMA read/write + interrupt unit tests |
+| Devices (RP, TM/TU) | not started (P6d–e) | — |
 | Content boot (Unix V6/V7) | not started | — |
 | Interactive SDL frontend | not started | — |
 | Verified fast mode | not started | — |

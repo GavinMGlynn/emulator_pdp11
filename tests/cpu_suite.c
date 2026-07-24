@@ -5,6 +5,7 @@
 #include "clk/clk.h"
 #include "console/console.h"
 #include "cpu/cpu.h"
+#include "devices/rk11.h"
 
 static pdp11_cpu *cpu;
 
@@ -706,6 +707,66 @@ static void test_dl11_transmitter_emits_to_the_sink_then_completes(void) {
     TEST_ASSERT_TRUE(cpu->tto_csr & DL11_DONE);  // ready again
 }
 
+// A small RK backing store: 4 sectors (1024 words) is enough to exercise the
+// DMA without allocating a whole 1.2M-word drive.
+static uint16_t rk_disk[1024];
+
+// Word count register value for an N-word transfer (two's-complement count).
+static uint16_t rk_wc(unsigned n) { return (uint16_t)(0200000u - n); }
+
+static void test_rk11_read_transfers_a_sector_from_disk_to_memory(void) {
+    for (int i = 0; i < 256; ++i) {
+        rk_disk[i] = (uint16_t)(0100000u + (unsigned)i); // pattern in sector 0
+    }
+    pdp11_rk_attach(cpu, rk_disk, 1024);
+    pdp11_rk_write(cpu, RK_RKBA, 0010000u);      // memory address
+    pdp11_rk_write(cpu, RK_RKDA, 0);             // disk block 0
+    pdp11_rk_write(cpu, RK_RKWC, rk_wc(256));    // 256 words
+    pdp11_rk_write(cpu, RK_RKCS, (2u << 1) | 1u); // FUNC=READ, GO
+    cpu->time_ns = cpu->rk.done_ns;              // let the transfer complete
+    pdp11_rk_poll(cpu);
+    TEST_ASSERT_TRUE(cpu->rk.rkcs & 0000200u);   // DONE
+    TEST_ASSERT_EQUAL_HEX16(0100000u, pdp11_mem_read_word(cpu->mem, 0010000u));
+    TEST_ASSERT_EQUAL_HEX16(0100000u + 255u,
+                            pdp11_mem_read_word(cpu->mem, 0010000u + 255u * 2u));
+    TEST_ASSERT_EQUAL_HEX16(0u, cpu->rk.rkwc);   // word count exhausted
+}
+
+static void test_rk11_write_transfers_memory_to_disk(void) {
+    for (int i = 0; i < 1024; ++i) {
+        rk_disk[i] = 0;
+    }
+    pdp11_rk_attach(cpu, rk_disk, 1024);
+    for (unsigned i = 0; i < 256; ++i) {
+        pdp11_mem_write_word(cpu->mem, 0010000u + i * 2u, (uint16_t)(040000u + i));
+    }
+    pdp11_rk_write(cpu, RK_RKBA, 0010000u);
+    pdp11_rk_write(cpu, RK_RKDA, 0);
+    pdp11_rk_write(cpu, RK_RKWC, rk_wc(256));
+    pdp11_rk_write(cpu, RK_RKCS, (1u << 1) | 1u); // FUNC=WRITE, GO
+    cpu->time_ns = cpu->rk.done_ns;
+    pdp11_rk_poll(cpu);
+    TEST_ASSERT_EQUAL_HEX16(040000u, rk_disk[0]);
+    TEST_ASSERT_EQUAL_HEX16(040000u + 255u, rk_disk[255]);
+}
+
+static void test_rk11_completion_interrupts_through_220_when_enabled(void) {
+    pdp11_mem_write_word(cpu->mem, 0000220u, 0003000u); // RK vector -> handler
+    pdp11_mem_write_word(cpu->mem, 0000222u, 0000340u);
+    cpu->r[PDP11_SP] = 0004000u;
+    pdp11_rk_attach(cpu, rk_disk, 1024);
+    pdp11_rk_write(cpu, RK_RKBA, 0010000u);
+    pdp11_rk_write(cpu, RK_RKDA, 0);
+    pdp11_rk_write(cpu, RK_RKWC, rk_wc(256));
+    pdp11_rk_write(cpu, RK_RKCS, (2u << 1) | 1u | 0000100u); // READ, GO, IE
+    cpu->time_ns = cpu->rk.done_ns;
+    pdp11_rk_poll(cpu);                          // completes -> requests BR5 int
+    const uint16_t prog[] = {0010000u};          // MOV R0,R0 (runs absent an int)
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0003000u, cpu->r[PDP11_PC]); // vectored to the handler
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -767,5 +828,8 @@ int main(void) {
     RUN_TEST(test_dl11_receiver_latches_input_and_reading_rbuf_clears_done);
     RUN_TEST(test_dl11_receiver_interrupt_vectors_through_060);
     RUN_TEST(test_dl11_transmitter_emits_to_the_sink_then_completes);
+    RUN_TEST(test_rk11_read_transfers_a_sector_from_disk_to_memory);
+    RUN_TEST(test_rk11_write_transfers_memory_to_disk);
+    RUN_TEST(test_rk11_completion_interrupts_through_220_when_enabled);
     return UNITY_END();
 }

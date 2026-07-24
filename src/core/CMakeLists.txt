@@ -5,6 +5,7 @@ add_library(pdp11_core STATIC
     cache/cache.c
     clk/clk.c
     console/console.c
+    devices/rk11.c
     fp/fp.c
     memory/memory.c
     timing/timing.c)
