@@ -2,6 +2,7 @@
 # Headers are included as "<subsystem>/<file>.h" from this directory root.
 add_library(pdp11_core STATIC
     cpu/cpu.c
+    cache/cache.c
     memory/memory.c
     timing/timing.c)
 

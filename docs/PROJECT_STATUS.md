@@ -40,7 +40,8 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | **MMU (KT11) — P3 COMPLETE** | **done** | relocation, aborts, banking, MFP*, I/D space |
 | MMU access control / aborts / MMR0 status | **working** (P3c) | `mmuabort` probe byte-identical to SimH; unit test |
 | Instruction timing (KB11-C tables) | **in progress** (P4a) | timing_suite vs Handbook App. C tables |
-| Cache (hit/miss) + bus/Massbus timing | not started (P4c/d) | — |
+| 11/70 cache (hit/miss timing) | **working** (P4c) | cache_suite; KB11-C sec 2.2 |
+| Per-cycle tick() core + Unibus/Massbus | not started (P4d) | — |
 | FP11-C floating point | not started | — |
 | Devices (KW11-L, DL11, RK, RP, TM/TU) | not started | — |
 | Content boot (Unix V6/V7) | not started | — |

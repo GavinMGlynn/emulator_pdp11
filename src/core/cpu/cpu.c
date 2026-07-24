@@ -68,6 +68,7 @@ void pdp11_cpu_reset(pdp11_cpu *cpu) {
     }
     cpu->instr_count = 0;
     cpu->time_ns = 0;
+    pdp11_cache_reset(&cpu->cache);
 }
 
 // CPU memory access goes through these (MMU relocation + I/O-page decode),
@@ -387,8 +388,11 @@ static uint16_t cpu_read_word_gen(pdp11_cpu *cpu, uint32_t va, int mode,
         cpu_bus_fault(cpu, VEC_BUS);
     }
     uint32_t pa = mmu_relocate(cpu, (uint16_t)va, false, mode, dspace);
-    return is_iopage(pa) ? io_read(cpu, (uint16_t)(pa & 0177777u))
-                         : pdp11_mem_read_word(cpu->mem, pa);
+    if (is_iopage(pa)) {
+        return io_read(cpu, (uint16_t)(pa & 0177777u)); // I/O page bypasses cache
+    }
+    pdp11_cache_read(&cpu->cache, pa); // read-miss counting for timing
+    return pdp11_mem_read_word(cpu->mem, pa);
 }
 
 static void cpu_write_word_mode(pdp11_cpu *cpu, uint32_t va, int mode,
@@ -428,6 +432,7 @@ static uint8_t cpu_read_byte(pdp11_cpu *cpu, uint32_t va) {
         uint16_t w = io_read(cpu, (uint16_t)(pa & 0177776u));
         return (uint8_t)((pa & 1u) ? (w >> 8) : (w & 0377u));
     }
+    pdp11_cache_read(&cpu->cache, pa); // read-miss counting for timing
     return pdp11_mem_read_byte(cpu->mem, pa);
 }
 

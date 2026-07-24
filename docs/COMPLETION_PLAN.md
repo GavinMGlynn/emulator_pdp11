@@ -96,8 +96,12 @@ recovery) and stack-limit yellow/red.
       all from Handbook App. C (PDF pp. 272-273). **[T]** timing_suite (15 cases)
       + branch-timing CPU test. Tail: DIV/ASH/ASHC (operand/shift-count
       dependent; the handbook gives only a range for DIV) and FP11 (P5).
-- [ ] **P4c** 11/70 cache (hit/miss) — add 1.02 us per read-cycle miss; model the
-      cache to derive hit/miss deterministically.
+- [x] **P4c** 11/70 cache (src/core/cache): two-way set-associative, 256 sets x
+      2-word blocks (1K words), write-through, per KB11-C sec. 2.2. Every RAM read
+      (fetch/operand/pointer/vector) checks the cache; each miss adds 1.02 us
+      (total time = cpu->time_ns + cache.misses*1020). Hardware random replacement
+      is modeled by a deterministic round-robin victim (documented). **[T]**
+      cache_suite (4 cases); architectural goldens unchanged (cache is timing-only).
 - [ ] **P4d** Reference `tick()` core (one tick per processor clock) for emergent
       DMA/bus contention; Unibus map + RH70 Massbus.
 - *Verify:* timing checked against KB11-C / Handbook tables **[T]**; every number

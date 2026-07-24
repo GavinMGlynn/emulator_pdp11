@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "cache/cache.h"
 #include "memory/memory.h"
 
 // PDP-11 processor state.
@@ -59,7 +60,11 @@ typedef struct pdp11_cpu {
     // time_ns accumulates KB11-C instruction execution time in nanoseconds
     // (all-cache-hits; the cache miss model lands at P4c).
     uint64_t instr_count;
-    uint64_t time_ns;
+    uint64_t time_ns; // KB11-C all-cache-hits execution time (ns)
+
+    // Cache model (timing only). Total execution time is
+    // time_ns + cache.misses * 1020 (1.02 us per read miss).
+    pdp11_cache cache;
 
     pdp11_mem *mem;
 } pdp11_cpu;

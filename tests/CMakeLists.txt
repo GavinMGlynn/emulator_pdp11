@@ -10,6 +10,11 @@ target_link_libraries(timing_suite PRIVATE pdp11_core unity)
 pdp11_set_warnings(timing_suite)
 add_test(NAME timing_suite COMMAND timing_suite)
 
+add_executable(cache_suite cache_suite.c)
+target_link_libraries(cache_suite PRIVATE pdp11_core unity)
+pdp11_set_warnings(cache_suite)
+add_test(NAME cache_suite COMMAND cache_suite)
+
 # No-reference golden regression: run the headless frontend on an image and diff
 # its canonical state dump against a checked-in golden produced by the SimH
 # oracle (tools/simh-oracle/). The golden is bit-identical across hosts and
