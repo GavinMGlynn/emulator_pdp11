@@ -223,7 +223,18 @@ real-output check) are exercised there.
     a boot-stream diff) lands with P7.
 
 ## P7 — Content boot (thermometer, not a goal)
-- [ ] Boot XXDP diagnostics, then Unix V6/V7 to a shell.
+- [~] **P7a** Reference boot established. The bootable image is `unix0_v6_rk.dsk`
+      (V6 root, from `roms/pdp-11.org.ru/files/unix/uv6swre.zip`; must be
+      writable). Under SimH on the 11/70 it boots to a root shell: the block-0
+      bootstrap prints `@`, type `unix`, the kernel reaches `login:`, log in
+      `root` → `# ` and commands run. Repeatable script:
+      `tools/simh-oracle/boot_v6.ini`; this console stream is the P7 target.
+      (`bitsavers .../rk05/v6unix.dsk` is a non-bootable *user* disk — not this.)
+- [ ] **P7b** Headless frontend boot harness: attach an RK image, `boot rk`
+      (load block 0 → memory, PC=0, run), and capture the DL11 console to stdout.
+- [ ] **P7c** Drive our core to console parity with SimH — the real integration
+      thermometer for the P6 devices (RK DMA, MMU, KW11-L, DL11). Diff is on
+      console *content* (SimH's clock is wall-clock-timed, not cycle-accurate).
 - *Verify:* console TTY stream diffed vs SimH booting the same image **[A]/[C]**.
 
 ## P8 — Interactive SDL3 frontend
