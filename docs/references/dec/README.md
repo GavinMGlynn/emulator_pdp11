@@ -36,5 +36,14 @@ for anything SimH's simplifications don't settle.
 ## Still to fetch when their phase arrives
 Device-specific EK manuals (RH70, RP04/06, RK11, DL11, KW11-L) and the KT11 MMU
 detail live in other bitsavers dirs / within the maintenance manual; pull them at
-P6 and add rows here. A full bulk mirror of `pdf/dec/pdp11/` also lands under
+P6 and add rows here. A bulk mirror of `pdf/dec/pdp11/` also lands under
 `roms/bitsavers.org/pdf/` (gitignored).
+
+**Mirror prune (2026-07-25).** The bulk mirror pulled the full `pdf/dec/pdp11/`
+tree (145 GB), of which 130 GB was `microfiche/Diagnostic_Program_Listings/
+Listings/` — raw scanned MAINDEC listing images, not reference documentation.
+That `Listings/` directory was removed, leaving 15 GB of actual manuals,
+handbooks, and the smaller `microfiche/{Manuals,Index}`. The KB11-C processor
+manual, PDP-11/70 handbook, FP11-C prints, and device manuals are all retained.
+Re-run the bitsavers mirror if the listings are ever needed; they are
+re-downloadable.
