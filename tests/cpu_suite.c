@@ -465,6 +465,24 @@ static void test_r0_r5_are_banked_by_the_psw_register_set_bit(void) {
     TEST_ASSERT_EQUAL_HEX16(0001111u, cpu->r[PDP11_R0]);
 }
 
+static void test_mfpi_reads_the_previous_modes_space_and_pushes_it(void) {
+    // Kernel current, user previous. User page 1 (VA 020000) -> PA 0100000.
+    cpu->psw = 0030000u;          // cm=Kernel, pm=User
+    cpu->r[PDP11_SP] = 0001000u;
+    cpu->pdr[0] = 0077406u;       // kernel code/stack
+    cpu->pdr[(3 << 4) | 1] = 0077406u; // user page 1
+    cpu->par[(3 << 4) | 1] = 0001000u; // user page 1 -> PA 0100000
+    cpu->mmr3 = 0000020u;
+    cpu->mmr0 = 0000001u;
+    pdp11_mem_write_word(cpu->mem, 0100000u, 0123456u); // value in user space
+    const uint16_t prog[] = {0006537u, 0020000u}; // MFPI @#020000
+    deposit(001000, prog, 2);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0000776u, cpu->r[PDP11_SP]);          // pushed one word
+    TEST_ASSERT_EQUAL_HEX16(0123456u,
+                            pdp11_mem_read_word(cpu->mem, 0000776u)); // user value
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -507,5 +525,6 @@ int main(void) {
     RUN_TEST(test_the_mmu_relocates_a_virtual_write_to_its_physical_page);
     RUN_TEST(test_a_write_to_a_read_only_page_aborts_through_vector_250);
     RUN_TEST(test_r0_r5_are_banked_by_the_psw_register_set_bit);
+    RUN_TEST(test_mfpi_reads_the_previous_modes_space_and_pushes_it);
     return UNITY_END();
 }

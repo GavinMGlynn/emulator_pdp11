@@ -73,6 +73,8 @@ static uint16_t cpu_read_word(pdp11_cpu *cpu, uint32_t va);
 static void cpu_write_word(pdp11_cpu *cpu, uint32_t va, uint16_t value);
 static uint8_t cpu_read_byte(pdp11_cpu *cpu, uint32_t va);
 static void cpu_write_byte(pdp11_cpu *cpu, uint32_t va, uint8_t value);
+static void push_word(pdp11_cpu *cpu, uint16_t value);
+static uint16_t pop_word(pdp11_cpu *cpu);
 
 // --- Instruction fetch ------------------------------------------------------
 // Read the word at the PC and advance the PC by two.
@@ -241,14 +243,16 @@ static uint16_t acf_violation(uint16_t acf, bool is_write) {
     }
 }
 
-// Relocate a 16-bit virtual address to a physical address, enforcing the PDR
-// access-control and page-length checks (aborting through vector 0250 on a
-// violation, after recording the page and error in MMR0). Management off is the
-// identity in the low 56 KB, folding the top 8 KB onto the I/O page (SimH
-// relocR). I/D separation and Super/User modes arrive at P3b.
-static uint32_t mmu_relocate(pdp11_cpu *cpu, uint16_t va, bool is_write) {
+// Relocate a 16-bit virtual address to a physical address in a given processor
+// mode (0=Kernel 1=Super 3=User), enforcing the PDR access-control and page-
+// length checks (aborting through vector 0250 on a violation, after recording
+// the page and error in MMR0). Management off is the identity in the low 56 KB,
+// folding the top 8 KB onto the I/O page (SimH relocR). Full I/D-space
+// separation (distinct instruction/data registers) is a P3b tail — while MMR3
+// D-space is disabled, all references use the I-space registers as here.
+static uint32_t mmu_relocate(pdp11_cpu *cpu, uint16_t va, bool is_write,
+                             int mode) {
     if (cpu->mmr0 & MMR0_MME) {
-        int mode = (cpu->psw >> 14) & 03;
         int idx = (mode << 4) | ((va >> 13) & 07); // dspace 0 for now
         uint16_t pdr = cpu->pdr[idx];
 
@@ -348,20 +352,25 @@ static void io_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
     // else: unmapped — dropped for now (NXM trap with the Unibus at P6).
 }
 
-static uint16_t cpu_read_word(pdp11_cpu *cpu, uint32_t va) {
+static int cur_mode(const pdp11_cpu *cpu) { return (cpu->psw >> 14) & 03; }
+
+// Word access in an explicit mode (used by MFPx/MTPx to reach the previous
+// mode's space); the plain versions use the current mode.
+static uint16_t cpu_read_word_mode(pdp11_cpu *cpu, uint32_t va, int mode) {
     if (va & 1u) { // a word reference to an odd address traps through vector 4
         cpu_bus_fault(cpu, VEC_BUS);
     }
-    uint32_t pa = mmu_relocate(cpu, (uint16_t)va, false);
+    uint32_t pa = mmu_relocate(cpu, (uint16_t)va, false, mode);
     return is_iopage(pa) ? io_read(cpu, (uint16_t)(pa & 0177777u))
                          : pdp11_mem_read_word(cpu->mem, pa);
 }
 
-static void cpu_write_word(pdp11_cpu *cpu, uint32_t va, uint16_t value) {
+static void cpu_write_word_mode(pdp11_cpu *cpu, uint32_t va, int mode,
+                                uint16_t value) {
     if (va & 1u) {
         cpu_bus_fault(cpu, VEC_BUS);
     }
-    uint32_t pa = mmu_relocate(cpu, (uint16_t)va, true);
+    uint32_t pa = mmu_relocate(cpu, (uint16_t)va, true, mode);
     if (is_iopage(pa)) {
         io_write(cpu, (uint16_t)(pa & 0177777u), value);
     } else {
@@ -369,8 +378,16 @@ static void cpu_write_word(pdp11_cpu *cpu, uint32_t va, uint16_t value) {
     }
 }
 
+static uint16_t cpu_read_word(pdp11_cpu *cpu, uint32_t va) {
+    return cpu_read_word_mode(cpu, va, cur_mode(cpu));
+}
+
+static void cpu_write_word(pdp11_cpu *cpu, uint32_t va, uint16_t value) {
+    cpu_write_word_mode(cpu, va, cur_mode(cpu), value);
+}
+
 static uint8_t cpu_read_byte(pdp11_cpu *cpu, uint32_t va) {
-    uint32_t pa = mmu_relocate(cpu, (uint16_t)va, false);
+    uint32_t pa = mmu_relocate(cpu, (uint16_t)va, false, cur_mode(cpu));
     if (is_iopage(pa)) {
         uint16_t w = io_read(cpu, (uint16_t)(pa & 0177776u));
         return (uint8_t)((pa & 1u) ? (w >> 8) : (w & 0377u));
@@ -379,7 +396,7 @@ static uint8_t cpu_read_byte(pdp11_cpu *cpu, uint32_t va) {
 }
 
 static void cpu_write_byte(pdp11_cpu *cpu, uint32_t va, uint8_t value) {
-    uint32_t pa = mmu_relocate(cpu, (uint16_t)va, true);
+    uint32_t pa = mmu_relocate(cpu, (uint16_t)va, true, cur_mode(cpu));
     if (is_iopage(pa)) {
         uint16_t reg = (uint16_t)(pa & 0177776u);
         uint16_t w = io_read(cpu, reg);
@@ -660,6 +677,45 @@ static void op_mark(pdp11_cpu *cpu, uint16_t word) {
     cpu->r[PDP11_SP] = (uint16_t)(i + 2u);
 }
 
+// MFPI/MFPD (0065): read the source operand from the *previous* mode's space
+// and push it onto the current stack. MTPI/MTPD (0066): pop from the current
+// stack and store into the previous mode. R6 refers to the previous mode's
+// stack pointer when the modes differ. (I and D spaces coincide while MMR3
+// D-space is disabled — the distinction is a P3b tail.)
+static void op_mfp(pdp11_cpu *cpu, uint16_t word) {
+    int pm = (cpu->psw >> 12) & 03;
+    int cm = cur_mode(cpu);
+    operand src = decode_operand(cpu, (uint8_t)(word & 077u), false);
+    uint16_t value;
+    if (src.is_reg) {
+        value = (src.reg == PDP11_SP && cm != pm) ? cpu->stackfile[pm]
+                                                  : cpu->r[src.reg];
+    } else {
+        value = cpu_read_word_mode(cpu, src.addr, pm);
+    }
+    set_nz(cpu, value, false);
+    set_flag(cpu, PDP11_PSW_V, false);
+    push_word(cpu, value);
+}
+
+static void op_mtp(pdp11_cpu *cpu, uint16_t word) {
+    int pm = (cpu->psw >> 12) & 03;
+    int cm = cur_mode(cpu);
+    uint16_t value = pop_word(cpu); // pop from the current stack first
+    set_nz(cpu, value, false);
+    set_flag(cpu, PDP11_PSW_V, false);
+    operand dst = decode_operand(cpu, (uint8_t)(word & 077u), false);
+    if (dst.is_reg) {
+        if (dst.reg == PDP11_SP && cm != pm) {
+            cpu->stackfile[pm] = value;
+        } else {
+            cpu->r[dst.reg] = value;
+        }
+    } else {
+        cpu_write_word_mode(cpu, dst.addr, pm, value);
+    }
+}
+
 static bool try_single_op(pdp11_cpu *cpu, uint16_t word) {
     uint16_t code = (uint16_t)((word >> 6) & 01777u); // bits 15-6
     bool bytemode = (code & 01000u) != 0;
@@ -671,6 +727,14 @@ static bool try_single_op(pdp11_cpu *cpu, uint16_t word) {
     }
     if (base == 0064 && !bytemode) { // MARK
         op_mark(cpu, word);
+        return true;
+    }
+    if (base == 0065) { // MFPI (word) / MFPD (byte-flagged)
+        op_mfp(cpu, word);
+        return true;
+    }
+    if (base == 0066) { // MTPI (word) / MTPD (byte-flagged)
+        op_mtp(cpu, word);
         return true;
     }
     if (base >= 0050 && base <= 0063) { // CLR..ASL (word + byte)

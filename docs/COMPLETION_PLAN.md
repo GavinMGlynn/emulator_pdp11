@@ -64,9 +64,13 @@ goldens + 36 unit tests, green on debug and release.
 - [~] **P3b** Dual register sets (PSW<11> banking of R0-R5) done via a central
       put_psw() that also banks the per-mode SP; do_trap now sets the previous-
       mode field and pushes to the new mode's stack; RTI and PSW writes route
-      through put_psw. **[A]** `regset` probe byte-identical to SimH. Remaining:
-      mode-switch SP probe, I/D-space separation (MMR3 D-space, fetch=I/data=D),
-      MFPI/MTPI/MFPD/MTPD, and kernel-forced vector reads for user-mode traps.
+      through put_psw. **[A]** `regset` probe byte-identical to SimH.
+- [x] **P3b** MFPI/MTPI/MFPD/MTPD via mode-generalized relocation (cpu_read/
+      write_word_mode); `regset` (register sets) and `mfp` (kernel reads user
+      space through the previous-mode mapping) probes byte-identical to SimH.
+      Remaining tail: full I/D-space separation (distinct I/D registers when MMR3
+      enables D-space; V6/V7-nonsep don't use it) and kernel-forced vector reads
+      for user-mode traps.
 - [x] **P3c** Access control (PDR ACF) + page-length aborts → vector 0250, with
       MMR0 status capture (NR/RO/PL error, faulting page, IC bit) and PDR A/W
       flags. A red-stack runaway guard prevents an infinite nested-abort loop

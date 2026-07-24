@@ -28,6 +28,8 @@ Status values: `open` · `confirmed` (matches oracle) · `fixed` · `divergence`
 
 | `regset` (P3b): write R0 in set 0, switch to set 1 via PSW<11>, write R0, switch back | mem[4000]=2222 mem[4002]=1111 | SimH 11/70 identical | confirmed | Validates the R0-R5 register-set banking through put_psw (routed from RTI, trap dispatch, and PSW writes). |
 
+| `mfp` (P3b): kernel (current) reads user (previous) VA 020000 via MFPI, user PAR maps it to PA 0100000 | R2=0123456 | SimH 11/70 identical | confirmed | Validates mode-generalized relocation (cpu_read_word_mode), MFPI's previous-mode read + push, and user-mode PAR mapping. |
+
 ## Timing (DEC paper oracle) — none yet
 Timing campaigns begin at P4. Each row will cite the KB11-C manual page/table it
 derives from, since SimH cannot verify cycle counts.
