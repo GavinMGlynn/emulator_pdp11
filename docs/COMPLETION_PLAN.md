@@ -309,10 +309,17 @@ real-output check) are exercised there.
     reaches the multi-user `login:` prompt** (`@unix\r\n\n\rlogin: `). Also strip
     console parity (V6 sends even parity in bit 7; a 7-bit terminal drops it, as
     SimH does) so the stream matches the oracle.
-- [~] **P7d** Reach a root shell + diff a command session. The kernel is up at
-      `login:`; next is prompt-aware input injection (wait for `login: ` → send
-      `root\r`, wait for `# ` → run `ls /` etc.) and a console-stream diff against
-      `boot_v6.ini`. *Verify:* TTY stream vs SimH **[C]**.
+- [~] **P7d** Reach a root shell + diff a command session. **Prompt-aware input
+      done:** `--dialog "exp|snd|exp|snd…"` (expect/send, like SimH) waits for each
+      prompt before typing. It reaches `login: ` and delivers `root\r`, which the
+      kernel receives and reads via the DL11 RX interrupt (verified). **Blocker:**
+      after reading the login name the kernel emits *no* console output (no echo,
+      no shell) and sits in a repeated disk-**write** loop over blocks 2/7/8 (in
+      50M instr: block 7 written 133×, 8 70×, 2 66× — far above SimH's periodic
+      sync). Likely a daemon/`update` sleep or an init/getty respawn spinning and
+      starving login of CPU. *Next:* characterise the write-loop's caller (PC +
+      what keeps the buffers dirty / the sleep from blocking) vs SimH. *Verify:*
+      TTY stream vs SimH **[C]**.
 - *Verify:* console TTY stream diffed vs SimH booting the same image **[A]/[C]**.
 
 ## P8 — Interactive SDL3 frontend

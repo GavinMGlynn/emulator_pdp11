@@ -61,14 +61,37 @@ static const uint16_t rk_boot_rom[] = {
     0005007,                    // CLR PC         ; jump to the loaded block 0
 };
 
+// Rolling tail of console output, so the dialog engine can wait for a prompt.
+typedef struct {
+    char tail[256];
+    size_t len;
+} console_state;
+
 static void console_sink(void *ctx, uint8_t ch) {
-    (void)ctx;
     // The DL11 transmits 8 bits; V6's console driver puts even parity in bit 7.
     // A KSR-33/VT-style console is a 7-bit ASCII device, so strip the parity bit
     // for display — matching SimH's default 7-bit terminal (so the boot stream
     // diffs cleanly against the oracle).
-    putchar(ch & 0177);
+    ch &= 0177u;
+    putchar(ch);
     fflush(stdout);
+    console_state *cs = ctx;
+    if (cs == NULL) {
+        return;
+    }
+    if (cs->len < sizeof cs->tail) {
+        cs->tail[cs->len++] = (char)ch;
+    } else {
+        memmove(cs->tail, cs->tail + 1, sizeof cs->tail - 1);
+        cs->tail[sizeof cs->tail - 1] = (char)ch;
+    }
+}
+
+// True when the console output currently ends with `s` (a prompt has appeared).
+static int tail_ends_with(const console_state *cs, const char *s) {
+    size_t n = strlen(s);
+    return n > 0 && cs->len >= n &&
+           memcmp(cs->tail + cs->len - n, s, n) == 0;
 }
 
 // Convert C-style escapes (\r \n \t \\) in an input script to raw bytes.
@@ -86,8 +109,51 @@ static size_t unescape(const char *s, uint8_t *out, size_t cap) {
     return n;
 }
 
+// A prompt-aware dialog: each step waits for `expect` to appear in the console
+// output, then types `send`. Mirrors SimH's `expect "…" send "…"`.
+#define MAX_STEPS 16
+typedef struct {
+    char expect[64];
+    uint8_t send[128];
+    size_t send_len;
+} dialog_step;
+
+// Parse "expect1|send1|expect2|send2|…" (fields C-escaped) into steps: field
+// pairs are (expect, send). A missing final send is treated as empty.
+static size_t parse_dialog(const char *spec, dialog_step *steps, size_t cap) {
+    size_t nfield = 0;
+    const char *p = spec;
+    while (*p != '\0' && nfield / 2 < cap) {
+        char field[128];
+        size_t fl = 0;
+        while (*p != '\0' && *p != '|') {
+            if (fl + 1 < sizeof field) {
+                field[fl++] = *p;
+            }
+            ++p;
+        }
+        field[fl] = '\0';
+        if (*p == '|') {
+            ++p; // consume separator
+        }
+        dialog_step *st = &steps[nfield / 2];
+        if (nfield % 2 == 0) { // expect field
+            st->expect[0] = '\0';
+            uint8_t raw[64];
+            size_t rl = unescape(field, raw, sizeof raw - 1);
+            memcpy(st->expect, raw, rl);
+            st->expect[rl] = '\0';
+            st->send_len = 0;
+        } else { // send field
+            st->send_len = unescape(field, st->send, sizeof st->send);
+        }
+        ++nfield;
+    }
+    return (nfield + 1) / 2; // number of steps (round up for a trailing expect)
+}
+
 static int run_boot(const char *disk_path, uint64_t max_instr,
-                    const char *in_script) {
+                    const char *in_script, const char *dialog_spec) {
     FILE *df = fopen(disk_path, "rb");
     if (df == NULL) {
         fprintf(stderr, "cannot open disk image '%s'\n", disk_path);
@@ -117,7 +183,8 @@ static int run_boot(const char *disk_path, uint64_t max_instr,
         free(disk);
         return 2;
     }
-    pdp11_console_set_sink(cpu, console_sink, NULL);
+    console_state cs = {.len = 0};
+    pdp11_console_set_sink(cpu, console_sink, &cs);
     pdp11_rk_attach(cpu, disk, RK_WORDS > words ? RK_WORDS : words);
 
     // Deposit the boot ROM and start at its entry (02002).
@@ -127,15 +194,33 @@ static int run_boot(const char *disk_path, uint64_t max_instr,
     }
     cpu->r[PDP11_PC] = (uint16_t)(BOOT_START + 2u);
 
+    // Two input modes: a naive script (`--in`, fed as fast as the receiver
+    // drains) or a prompt-aware dialog (`--dialog`, waits for each prompt).
     uint8_t input[512];
     size_t in_len = in_script ? unescape(in_script, input, sizeof input) : 0;
     size_t in_pos = 0;
 
+    dialog_step steps[MAX_STEPS];
+    size_t nsteps = dialog_spec ? parse_dialog(dialog_spec, steps, MAX_STEPS) : 0;
+    size_t cur = 0;         // current dialog step
+    uint8_t pend[128];      // bytes queued to type for the current step
+    size_t pend_len = 0, pend_pos = 0;
+
     for (uint64_t i = 0; i < max_instr && !cpu->halted; ++i) {
         pdp11_cpu_step(cpu);
-        // Feed the next scripted key once the receiver buffer is empty.
-        if (in_pos < in_len && !(cpu->tti_csr & DL11_DONE)) {
+        if (cpu->tti_csr & DL11_DONE) {
+            continue; // receiver still holds a byte — nothing to feed yet
+        }
+        if (in_pos < in_len) { // naive script
             pdp11_console_input(cpu, input[in_pos++]);
+        } else if (pend_pos < pend_len) { // typing the current step's reply
+            pdp11_console_input(cpu, pend[pend_pos++]);
+        } else if (cur < nsteps && tail_ends_with(&cs, steps[cur].expect)) {
+            memcpy(pend, steps[cur].send, steps[cur].send_len);
+            pend_len = steps[cur].send_len;
+            pend_pos = 0;
+            cs.len = 0; // consume the matched output so it can't re-trigger
+            ++cur;
         }
     }
     fprintf(stderr, "\n[boot: halted=%d instr=%llu pc=%06o]\n",
@@ -152,19 +237,24 @@ int main(int argc, char **argv) {
         const char *disk = argv[2];
         uint64_t max_instr = 50000000ull;
         const char *in_script = NULL;
+        const char *dialog = NULL;
         for (int i = 3; i + 1 < argc; i += 2) {
             if (strcmp(argv[i], "--max") == 0) {
                 max_instr = strtoull(argv[i + 1], NULL, 10);
             } else if (strcmp(argv[i], "--in") == 0) {
                 in_script = argv[i + 1];
+            } else if (strcmp(argv[i], "--dialog") == 0) {
+                dialog = argv[i + 1];
             }
         }
-        return run_boot(disk, max_instr, in_script);
+        return run_boot(disk, max_instr, in_script, dialog);
     }
 
     if (argc != 2) {
         fprintf(stderr, "usage: %s <image-file>\n", argv[0]);
-        fprintf(stderr, "   or: %s --boot-rk <disk.dsk> [--max N] [--in script]\n",
+        fprintf(stderr,
+                "   or: %s --boot-rk <disk.dsk> [--max N] [--in script] "
+                "[--dialog \"exp|snd|exp|snd\"]\n",
                 argv[0]);
         return 2;
     }

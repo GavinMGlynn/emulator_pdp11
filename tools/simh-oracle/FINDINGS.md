@@ -166,6 +166,23 @@ Mirror SimH `Map_Addr`. Unit-test the relocation and re-check the boot. Tools:
 `--boot-rk` + `PCTRACE`/`RKGO`/`SWAPDUMP`/`PAWRITE`/`UBMLOG` env logs (ours),
 `SET RK DEBUG=OPS` (SimH).
 
+**P7d — prompt-aware login + post-login write loop (2026-07-25).** Added an
+expect/send dialog engine to the headless boot harness (`--dialog
+"exp|snd|exp|snd…"`) so input waits for each prompt (like SimH `expect`/`send`).
+It reaches `login: ` and delivers `root\r`; instrumenting the DL11 confirms the
+kernel **receives and reads** every typed byte via the RX interrupt (ie=1). But
+after reading the login name the kernel writes **nothing** to the console (no
+echo, no shell) and sits in a repeated disk-**write** loop over blocks 2/7/8 (in
+50M instr: block 7 ×133, 8 ×70, 2 ×66 — SimH's whole boot-to-login is 230 ops).
+The write loop appears even without sending `root`, so it is a background kernel
+loop, not login-triggered; it likely starves login of CPU. Hypotheses: the V6
+`update` daemon's `sleep(30)` not blocking (a clock/sleep issue), or init
+respawning a getty that exits. *Next:* trace the write loop's caller PC and what
+keeps those buffers dirty / the sleep from blocking, vs SimH. (SimH console
+capture in batch mode is unreliable here — `expect`/`send` don't echo the guest
+stream to stdout or `set console log`; will need `send after=<instr>` timing or a
+targeted trap trace instead.)
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|
