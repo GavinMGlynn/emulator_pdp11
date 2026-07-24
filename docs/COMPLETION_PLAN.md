@@ -61,8 +61,12 @@ goldens + 36 unit tests, green on debug and release.
       routed through it. MMU-off stays identity (existing 11 goldens unchanged).
       **[A]** `mmu` probe (relocate a write and read it back through a second
       mapping) byte-identical to SimH.
-- [ ] **P3b** I/D-space separation; Super/User modes + mode-correct stack/vector
-      access; dual register sets.
+- [~] **P3b** Dual register sets (PSW<11> banking of R0-R5) done via a central
+      put_psw() that also banks the per-mode SP; do_trap now sets the previous-
+      mode field and pushes to the new mode's stack; RTI and PSW writes route
+      through put_psw. **[A]** `regset` probe byte-identical to SimH. Remaining:
+      mode-switch SP probe, I/D-space separation (MMR3 D-space, fetch=I/data=D),
+      MFPI/MTPI/MFPD/MTPD, and kernel-forced vector reads for user-mode traps.
 - [x] **P3c** Access control (PDR ACF) + page-length aborts → vector 0250, with
       MMR0 status capture (NR/RO/PL error, faulting page, IC bit) and PDR A/W
       flags. A red-stack runaway guard prevents an infinite nested-abort loop

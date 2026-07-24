@@ -26,6 +26,8 @@ Status values: `open` · `confirmed` (matches oracle) · `fixed` · `divergence`
 
 | `mmuabort` (P3c): write to a read-only kernel page → MMU abort (0250); handler reads MMR0 | R2=1 R3=0, MMR0=020205 | first attempt MMR0=020005 → now identical | **fixed** | Two findings: (1) a red-stack runaway — with PDRs unset the fetch aborts and the abort's own stack push aborts again, an infinite nested abort; added a depth guard that halts. (2) MMR0 bit 7 (MMR0_IC, "instruction complete") is set on trap dispatch (SimH pdp11_cpu.c:872); we now set it in do_trap, matching 020205. |
 
+| `regset` (P3b): write R0 in set 0, switch to set 1 via PSW<11>, write R0, switch back | mem[4000]=2222 mem[4002]=1111 | SimH 11/70 identical | confirmed | Validates the R0-R5 register-set banking through put_psw (routed from RTI, trap dispatch, and PSW writes). |
+
 ## Timing (DEC paper oracle) — none yet
 Timing campaigns begin at P4. Each row will cite the KB11-C manual page/table it
 derives from, since SimH cannot verify cycle counts.

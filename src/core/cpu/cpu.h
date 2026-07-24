@@ -42,6 +42,12 @@ typedef struct pdp11_cpu {
     uint16_t par[64];
     uint16_t pdr[64];
 
+    // Banked registers. R0-R5 have two sets (PSW<11>); the inactive set lives in
+    // regfile. R6 (SP) is banked per mode (Kernel/Super/User); the inactive SPs
+    // live in stackfile. The active set/SP is always in r[]. (P3b)
+    uint16_t regfile[6][2];
+    uint16_t stackfile[4];
+
     // Mid-instruction fault handling. A bus/odd-address (later MMU) fault
     // longjmps to abort_env, set up at the top of each instruction, and the
     // step loop then traps through abort_vec.

@@ -57,6 +57,13 @@ void pdp11_cpu_reset(pdp11_cpu *cpu) {
         cpu->par[i] = 0;
         cpu->pdr[i] = 0;
     }
+    for (int i = 0; i < 6; ++i) {
+        cpu->regfile[i][0] = 0;
+        cpu->regfile[i][1] = 0;
+    }
+    for (int i = 0; i < 4; ++i) {
+        cpu->stackfile[i] = 0;
+    }
     cpu->instr_count = 0;
 }
 
@@ -175,6 +182,27 @@ static void put_pirq(pdp11_cpu *cpu, uint16_t value) {
     int level = highest_pir_level(req);
     uint16_t encoded = level ? (uint16_t)((level << 5) | (level << 1)) : 0u;
     cpu->pirq = (uint16_t)(req | encoded);
+}
+
+// Load a new PSW, banking the general registers and stack pointer if the
+// register set (PSW<11>) or current mode (PSW<15:14>) changed. All PSW changes
+// that can alter those fields (traps, RTI, writes to 0177776) go through here.
+static void put_psw(pdp11_cpu *cpu, uint16_t new_psw) {
+    int old_rs = (cpu->psw >> 11) & 01;
+    int new_rs = (new_psw >> 11) & 01;
+    if (new_rs != old_rs) {
+        for (int i = 0; i < 6; ++i) {
+            cpu->regfile[i][old_rs] = cpu->r[i];
+            cpu->r[i] = cpu->regfile[i][new_rs];
+        }
+    }
+    int old_cm = (cpu->psw >> 14) & 03;
+    int new_cm = (new_psw >> 14) & 03;
+    if (new_cm != old_cm) {
+        cpu->stackfile[old_cm] = cpu->r[PDP11_SP];
+        cpu->r[PDP11_SP] = cpu->stackfile[new_cm];
+    }
+    cpu->psw = new_psw;
 }
 
 // --- KT11 memory management -------------------------------------------------
@@ -303,7 +331,7 @@ static void io_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
     bool is_par;
     int idx;
     switch (a) {
-    case IOPAGE_PSW:  cpu->psw = value; return;
+    case IOPAGE_PSW:  put_psw(cpu, value); return;
     case IOPAGE_PIRQ: put_pirq(cpu, value); return;
     case 0177572u:    cpu->mmr0 = value; return;
     case 0172516u:    cpu->mmr3 = value; return;
@@ -769,12 +797,17 @@ static void op_ccops(pdp11_cpu *cpu, uint16_t word) {
 // the new PC/PSW from the vector. PC is pushed last so RTI/RTT pop it first.
 static void do_trap(pdp11_cpu *cpu, uint16_t vector) {
     uint16_t old_psw = cpu->psw;
+    uint16_t old_pc = cpu->r[PDP11_PC];
+    uint16_t old_mode = (uint16_t)((old_psw >> 14) & 03u);
     uint16_t new_pc = cpu_read_word(cpu, vector);
     uint16_t new_psw = cpu_read_word(cpu, (uint16_t)(vector + 2u));
+    // The new PSW's previous-mode field records the mode we trapped from.
+    new_psw = (uint16_t)((new_psw & ~0030000u) | ((uint32_t)old_mode << 12));
+    // Switch mode/register set first, then push the old state on the new stack.
+    put_psw(cpu, new_psw);
     push_word(cpu, old_psw);
-    push_word(cpu, cpu->r[PDP11_PC]);
+    push_word(cpu, old_pc);
     cpu->r[PDP11_PC] = new_pc;
-    cpu->psw = new_psw;
     cpu->mmr0 |= MMR0_IC; // instruction-complete bit, set on trap dispatch
 }
 
@@ -783,8 +816,8 @@ static void do_trap(pdp11_cpu *cpu, uint16_t vector) {
 // restored PC; RTT defers to the normal after-instruction rule. This is the one
 // documented behavioural difference between the two (KB11-C; verified vs SimH).
 static void op_rti(pdp11_cpu *cpu, bool is_rtt) {
-    cpu->r[PDP11_PC] = pop_word(cpu);
-    cpu->psw = pop_word(cpu);
+    cpu->r[PDP11_PC] = pop_word(cpu); // pop from the current stack, then switch
+    put_psw(cpu, pop_word(cpu));
     if (!is_rtt && (cpu->psw & PDP11_PSW_T)) {
         cpu->trace_pending = true;
     }

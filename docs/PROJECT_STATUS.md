@@ -34,7 +34,8 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | MARK | **working** (P2d) | `mark` probe byte-identical to SimH |
 | **CPU (integer) — P1+P2 COMPLETE** | **done** | 10 SimH goldens + 36 unit tests |
 | MMU relocation (KT11, 22-bit, PAR/PDR) | **working** (P3a) | `mmu` probe byte-identical to SimH; unit test |
-| MMU I/D space + Super/User modes | not started (P3b) | — |
+| Dual register sets (PSW<11>) | **working** (P3b) | `regset` probe byte-identical to SimH; unit test |
+| MMU I/D space + Super/User SP + MFP* | in progress (P3b) | put_psw banks SP + regset; mode/ID/MFP probes pending |
 | MMU access control / aborts / MMR0 status | **working** (P3c) | `mmuabort` probe byte-identical to SimH; unit test |
 | Cache + Unibus/Massbus timing | not started | — (the cycle-accuracy core) |
 | FP11-C floating point | not started | — |

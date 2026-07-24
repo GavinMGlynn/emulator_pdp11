@@ -452,6 +452,19 @@ static void test_a_write_to_a_read_only_page_aborts_through_vector_250(void) {
     TEST_ASSERT_EQUAL_HEX16(0000004u, cpu->mmr0 & 0000176u); // page 2 recorded
 }
 
+static void test_r0_r5_are_banked_by_the_psw_register_set_bit(void) {
+    cpu->r[PDP11_R0] = 0001111u; // set 0
+    // MOV #4000, @#177776 ; MOV #0, @#177776  (switch to set 1, then back)
+    const uint16_t prog[] = {0012737u, 0004000u, 0177776u,
+                             0012737u, 0000000u, 0177776u};
+    deposit(001000, prog, 6);
+    pdp11_cpu_step(cpu); // -> set 1: R0 becomes the (empty) alternate set
+    TEST_ASSERT_EQUAL_HEX16(0u, cpu->r[PDP11_R0]);
+    cpu->r[PDP11_R0] = 0002222u; // set 1
+    pdp11_cpu_step(cpu); // -> back to set 0
+    TEST_ASSERT_EQUAL_HEX16(0001111u, cpu->r[PDP11_R0]);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -493,5 +506,6 @@ int main(void) {
     RUN_TEST(test_jmp_to_a_register_is_illegal_on_the_11_70);
     RUN_TEST(test_the_mmu_relocates_a_virtual_write_to_its_physical_page);
     RUN_TEST(test_a_write_to_a_read_only_page_aborts_through_vector_250);
+    RUN_TEST(test_r0_r5_are_banked_by_the_psw_register_set_bit);
     return UNITY_END();
 }
