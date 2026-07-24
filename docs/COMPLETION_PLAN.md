@@ -63,9 +63,12 @@ goldens + 36 unit tests, green on debug and release.
       mapping) byte-identical to SimH.
 - [ ] **P3b** I/D-space separation; Super/User modes + mode-correct stack/vector
       access; dual register sets.
-- [ ] **P3c** Access control (PDR ACF) + page-length aborts → vector 0250; MMR0
-      status capture, MMR1 (auto-inc/dec recovery), MMR2. (SimH aborts on ACF=0,
-      which P3a's probe worked around by setting PDRs read/write.)
+- [x] **P3c** Access control (PDR ACF) + page-length aborts → vector 0250, with
+      MMR0 status capture (NR/RO/PL error, faulting page, IC bit) and PDR A/W
+      flags. A red-stack runaway guard prevents an infinite nested-abort loop
+      when the kernel stack page is not resident. **[A]** `mmuabort` probe
+      (write to a read-only page; handler reads MMR0=020205) byte-identical to
+      SimH. MMR1 (auto-inc/dec recovery) and MMR2 remain a small tail.
 - *Verify:* fault/abort + relocation probes **[A]**; MMR status **[A]**.
 
 ## P4 — Cache + Unibus/Massbus timing  ← the cycle-accuracy core

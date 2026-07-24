@@ -50,6 +50,7 @@ void pdp11_cpu_reset(pdp11_cpu *cpu) {
     cpu->waiting = false;
     cpu->trace_pending = false;
     cpu->pirq = 0;
+    cpu->abort_depth = 0;
     cpu->mmr0 = 0;
     cpu->mmr3 = 0;
     for (int i = 0; i < 64; ++i) {
@@ -178,19 +179,70 @@ static void put_pirq(pdp11_cpu *cpu, uint16_t value) {
 
 // --- KT11 memory management -------------------------------------------------
 #define MMR0_MME   0000001u // management enable
+#define MMR0_IC    0000200u // instruction complete (set on trap dispatch)
+#define MMR0_PAGE  0000176u // faulting page field (apridx << 1)
+#define MMR0_RO    0020000u // read-only violation
+#define MMR0_PL    0040000u // page-length error
+#define MMR0_NR    0100000u // non-resident (no access)
+#define MMR0_FREEZE 0160000u // any error bit -> MMR0 frozen
 #define MMR3_M22E  0000020u // 22-bit enable
+#define PDR_ACF    0000007u // access-control field
+#define PDR_ED     0000010u // expansion direction (1 = downward)
+#define PDR_W      0000100u // written flag
+#define PDR_A      0000200u // accessed flag
+#define PDR_PLF    0077400u // page-length field
 #define PAMASK22   017777777u // 22-bit physical address mask
 #define IOPAGE_TOP 017760000u // physical base of the 8 KB I/O page
+#define VEC_MME    0250u    // memory-management abort
 
-// Relocate a 16-bit virtual address to a physical address. When management is
-// off this is the identity in the low 56 KB, with the top 8 KB folded onto the
-// I/O page (matching the hardware and SimH relocR). Access-control and page-
-// length aborts arrive at P3c; I/D-space separation and Super/User modes at P3b
-// (D references use the I-space registers while MMR3 D-space is disabled).
-static uint32_t mmu_relocate(const pdp11_cpu *cpu, uint16_t va) {
+// Which MMR0 error bit (if any) an access-control field raises for a given
+// direction. ACF: 0/1/3/7 non-resident, 2 read-only, 4/5/6 read-write-ish. The
+// 11/70 "trap" codes (1,4,5) permit the access here; the MMU-trap-vs-abort
+// refinement (MMR0_TRAP/TENB) is a P3c tail.
+static uint16_t acf_violation(uint16_t acf, bool is_write) {
+    if (is_write) {
+        switch (acf) {
+        case 4: case 5: case 6: return 0;        // writable
+        case 2:                 return MMR0_RO;  // read-only
+        default:                return MMR0_NR;  // 0,1,3,7 non-resident
+        }
+    }
+    switch (acf) {
+    case 1: case 2: case 4: case 5: case 6: return 0; // readable
+    default:                                return MMR0_NR; // 0,3,7
+    }
+}
+
+// Relocate a 16-bit virtual address to a physical address, enforcing the PDR
+// access-control and page-length checks (aborting through vector 0250 on a
+// violation, after recording the page and error in MMR0). Management off is the
+// identity in the low 56 KB, folding the top 8 KB onto the I/O page (SimH
+// relocR). I/D separation and Super/User modes arrive at P3b.
+static uint32_t mmu_relocate(pdp11_cpu *cpu, uint16_t va, bool is_write) {
     if (cpu->mmr0 & MMR0_MME) {
         int mode = (cpu->psw >> 14) & 03;
         int idx = (mode << 4) | ((va >> 13) & 07); // dspace 0 for now
+        uint16_t pdr = cpu->pdr[idx];
+
+        uint16_t err = acf_violation(pdr & PDR_ACF, is_write);
+        uint16_t dbn = (uint16_t)(va & 017700u);          // block number
+        uint16_t plf = (uint16_t)((pdr & PDR_PLF) >> 2);
+        if ((pdr & PDR_ED) ? (dbn < plf) : (dbn > plf)) { // page-length error
+            err |= MMR0_PL;
+        }
+        if (err) {
+            if (!(cpu->mmr0 & MMR0_FREEZE)) { // capture page + error once
+                cpu->mmr0 = (uint16_t)((cpu->mmr0 & ~MMR0_PAGE)
+                                       | ((unsigned)idx << 1));
+                cpu->mmr0 |= err;
+            }
+            cpu_bus_fault(cpu, VEC_MME);
+        }
+        cpu->pdr[idx] |= PDR_A;               // accessed
+        if (is_write) {
+            cpu->pdr[idx] |= PDR_W;           // written
+        }
+
         uint32_t pa = ((uint32_t)(va & 017777u)
                        + ((uint32_t)cpu->par[idx] << 6)) & PAMASK22;
         if (!(cpu->mmr3 & MMR3_M22E)) { // 18-bit relocation
@@ -272,7 +324,7 @@ static uint16_t cpu_read_word(pdp11_cpu *cpu, uint32_t va) {
     if (va & 1u) { // a word reference to an odd address traps through vector 4
         cpu_bus_fault(cpu, VEC_BUS);
     }
-    uint32_t pa = mmu_relocate(cpu, (uint16_t)va);
+    uint32_t pa = mmu_relocate(cpu, (uint16_t)va, false);
     return is_iopage(pa) ? io_read(cpu, (uint16_t)(pa & 0177777u))
                          : pdp11_mem_read_word(cpu->mem, pa);
 }
@@ -281,7 +333,7 @@ static void cpu_write_word(pdp11_cpu *cpu, uint32_t va, uint16_t value) {
     if (va & 1u) {
         cpu_bus_fault(cpu, VEC_BUS);
     }
-    uint32_t pa = mmu_relocate(cpu, (uint16_t)va);
+    uint32_t pa = mmu_relocate(cpu, (uint16_t)va, true);
     if (is_iopage(pa)) {
         io_write(cpu, (uint16_t)(pa & 0177777u), value);
     } else {
@@ -290,7 +342,7 @@ static void cpu_write_word(pdp11_cpu *cpu, uint32_t va, uint16_t value) {
 }
 
 static uint8_t cpu_read_byte(pdp11_cpu *cpu, uint32_t va) {
-    uint32_t pa = mmu_relocate(cpu, (uint16_t)va);
+    uint32_t pa = mmu_relocate(cpu, (uint16_t)va, false);
     if (is_iopage(pa)) {
         uint16_t w = io_read(cpu, (uint16_t)(pa & 0177776u));
         return (uint8_t)((pa & 1u) ? (w >> 8) : (w & 0377u));
@@ -299,7 +351,7 @@ static uint8_t cpu_read_byte(pdp11_cpu *cpu, uint32_t va) {
 }
 
 static void cpu_write_byte(pdp11_cpu *cpu, uint32_t va, uint8_t value) {
-    uint32_t pa = mmu_relocate(cpu, (uint16_t)va);
+    uint32_t pa = mmu_relocate(cpu, (uint16_t)va, true);
     if (is_iopage(pa)) {
         uint16_t reg = (uint16_t)(pa & 0177776u);
         uint16_t w = io_read(cpu, reg);
@@ -723,6 +775,7 @@ static void do_trap(pdp11_cpu *cpu, uint16_t vector) {
     push_word(cpu, cpu->r[PDP11_PC]);
     cpu->r[PDP11_PC] = new_pc;
     cpu->psw = new_psw;
+    cpu->mmr0 |= MMR0_IC; // instruction-complete bit, set on trap dispatch
 }
 
 // RTI/RTT: pop PC then PSW. On the 11/70 an RTI (but not RTT) that restores the
@@ -960,13 +1013,21 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
         cpu->trace_pending = true;
     }
 
-    // A bus/odd-address fault during the instruction longjmps back here and
-    // traps through the recorded vector.
+    // A bus/odd-address/MMU fault during the instruction longjmps back here and
+    // traps through the recorded vector. If the trap's own stack pushes keep
+    // faulting (a red-stack runaway — e.g. the kernel stack page is not
+    // resident), halt rather than spin forever. (Full red-stack-abort-to-4
+    // semantics are a P3c tail.)
     if (setjmp(cpu->abort_env)) {
+        if (++cpu->abort_depth > 8) {
+            cpu->halted = true;
+            return;
+        }
         do_trap(cpu, cpu->abort_vec);
         cpu->instr_count++;
         return;
     }
+    cpu->abort_depth = 0;
 
     uint16_t word = fetch(cpu);
     uint8_t top = (uint8_t)((word >> 12) & 017u);

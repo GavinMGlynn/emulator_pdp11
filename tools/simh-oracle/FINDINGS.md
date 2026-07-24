@@ -24,6 +24,8 @@ Status values: `open` · `confirmed` (matches oracle) · `fixed` · `divergence`
 
 | `mmu` (P3a): kernel PARs map VA pages 1 & 2 to PA 0100000; write via one, read via the other | R0=0123456 (relocation worked) | SimH 11/70 identical | confirmed | Oracle caught a gap first: with PDRs=0 SimH aborts every access (ACF=0 non-resident) and halted at the MMU-enable boundary; our P3a ignores the PDR (access control is P3c). Setting PDRs read/write (077406) let SimH run; the PAR-based translation then matched exactly. |
 
+| `mmuabort` (P3c): write to a read-only kernel page → MMU abort (0250); handler reads MMR0 | R2=1 R3=0, MMR0=020205 | first attempt MMR0=020005 → now identical | **fixed** | Two findings: (1) a red-stack runaway — with PDRs unset the fetch aborts and the abort's own stack push aborts again, an infinite nested abort; added a depth guard that halts. (2) MMR0 bit 7 (MMR0_IC, "instruction complete") is set on trap dispatch (SimH pdp11_cpu.c:872); we now set it in do_trap, matching 020205. |
+
 ## Timing (DEC paper oracle) — none yet
 Timing campaigns begin at P4. Each row will cite the KB11-C manual page/table it
 derives from, since SimH cannot verify cycle counts.

@@ -47,6 +47,7 @@ typedef struct pdp11_cpu {
     // step loop then traps through abort_vec.
     jmp_buf abort_env;
     uint16_t abort_vec;
+    int abort_depth; // consecutive faults in one step (red-stack runaway guard)
 
     // Cycle accounting. The reference core will drive this from the KB11-C
     // timing model once cache/bus timing lands (COMPLETION_PLAN P4); until then

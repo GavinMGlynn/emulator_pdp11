@@ -419,6 +419,8 @@ static void test_jmp_to_a_register_is_illegal_on_the_11_70(void) {
 }
 
 static void test_the_mmu_relocates_a_virtual_write_to_its_physical_page(void) {
+    cpu->pdr[0] = 0077406u; // code page: read/write, full length
+    cpu->pdr[1] = 0077406u; // target page: read/write, full length
     cpu->par[1] = 0001000u; // VA page 1 (020000) -> PA 0100000
     cpu->mmr3 = 0000020u;   // 22-bit enable
     cpu->mmr0 = 0000001u;   // management enable
@@ -430,6 +432,24 @@ static void test_the_mmu_relocates_a_virtual_write_to_its_physical_page(void) {
                             pdp11_mem_read_word(cpu->mem, 0100000u));
     // And nothing landed at the unrelocated virtual address.
     TEST_ASSERT_EQUAL_HEX16(0u, pdp11_mem_read_word(cpu->mem, 0020000u));
+}
+
+static void test_a_write_to_a_read_only_page_aborts_through_vector_250(void) {
+    cpu->r[PDP11_SP] = 0017000u;  // stack in page 0
+    cpu->pdr[0] = 0077406u;       // code/stack page: read/write
+    cpu->pdr[2] = 0077402u;       // page 2: read-only (ACF = 2)
+    cpu->mmr3 = 0000020u;         // 22-bit
+    cpu->mmr0 = 0000001u;         // enable
+    pdp11_mem_write_word(cpu->mem, 0250u, 0001600u); // MMU-abort vector
+    pdp11_mem_write_word(cpu->mem, 0252u, 0u);
+    // MOV #123, @#040000  — write into the read-only page 2
+    const uint16_t prog[] = {0012737u, 0000123u, 0040000u};
+    deposit(001000, prog, 3);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0001600u, cpu->r[PDP11_PC]); // vectored to handler
+    TEST_ASSERT_TRUE(cpu->mmr0 & 0020000u);              // read-only error
+    TEST_ASSERT_TRUE(cpu->mmr0 & 0000200u);              // instruction complete
+    TEST_ASSERT_EQUAL_HEX16(0000004u, cpu->mmr0 & 0000176u); // page 2 recorded
 }
 
 int main(void) {
@@ -472,5 +492,6 @@ int main(void) {
     RUN_TEST(test_mark_restores_pc_from_r5_and_cleans_the_stack);
     RUN_TEST(test_jmp_to_a_register_is_illegal_on_the_11_70);
     RUN_TEST(test_the_mmu_relocates_a_virtual_write_to_its_physical_page);
+    RUN_TEST(test_a_write_to_a_read_only_page_aborts_through_vector_250);
     return UNITY_END();
 }
