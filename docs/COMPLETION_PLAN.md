@@ -123,12 +123,22 @@ recovery) and stack-limit yellow/red.
       64-bit FAC packing (word0<<48..word3), FP-sized autoincrement addressing,
       and the FP condition codes (N=sign, Z=exp 0). **[A]** `fpls` probe (load
       1.0, store, negate, store -1.0) byte-identical to SimH.
-- [~] **P5c** Arithmetic. ADDF/ADDD and SUBF/SUBD done via a bit-exact port of
-      SimH's addfp11/round_and_pack (src/core/fp) — the guard-bit/rounding
-      machinery all subsequent ops reuse. **[A]** `fpadd` probe byte-identical to
-      SimH. Remaining: MUL/DIV/CMP/MOD, conversions (LDC*/STC*, LDEXP/STEXP), and
-      the FEC/FEA + FPE-trap exception model.
+- [x] **P5c** Arithmetic and conversions, via a bit-exact port of SimH's
+      pdp11_fp.c (src/core/fp): ADDF/SUBF, MULF, DIVF, MODF, CMPF, the LDC/STC
+      float↔float and int↔float conversions (LDCff'/STCff', LDCif/STCfi), and
+      LDEXP/STEXP — all sharing the guard-bit/round_and_pack machinery. The
+      exception model mirrors fpnotrap: over/underflow/conversion errors are
+      silently suppressed unless their FPS enable is set, otherwise FEC/FEA are
+      posted and the FPE trap (vector 0244) is taken unless FPS_ID; divide-by-zero
+      always traps. STEXP/STCfi write the CPU condition codes as well as the FPS.
+      **[A]** `fparith` (MUL/DIV/CMP/MOD + all conversions, single), `fpdbl`
+      (double-precision 56-bit multiply/divide paths), and `fpe` (divide-by-zero
+      → FPE trap, FEC/FEA verified) probes byte-identical to SimH; unit tests.
 - *Verify:* FP arithmetic probes **[A]**; FP timing **[T]**.
+  - *Documented tail:* the undefined-variable trap (FEC_UNDFV / FPS_IUV) on a
+    "dirty zero" operand read is not yet posted; with IUV disabled (the default,
+    and what the probes use) behaviour is identical to SimH. FP instruction
+    timing (**[T]**, FP11-C manual) is folded into the P4 timing tail.
 
 ## P6 — Devices for the Unix boot
 - [ ] KW11-L line clock; DL11 console SLU; RK11/RK05; RP04/06 via RH70;

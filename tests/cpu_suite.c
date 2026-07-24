@@ -572,6 +572,56 @@ static void test_addf_adds_two_single_floats(void) {
     TEST_ASSERT_FALSE(cpu->fps & 0000004u); // FP Z clear (nonzero)
 }
 
+static void test_mulf_multiplies_two_single_floats(void) {
+    // AC0 = 2.0 ; MULF @#2000 (3.0) -> 6.0 (high word 040700)
+    cpu->fac[0] = 0x4100000000000000ULL; // 2.0
+    pdp11_mem_write_word(cpu->mem, 0002000u, 0040500u); // 3.0
+    pdp11_mem_write_word(cpu->mem, 0002002u, 0u);
+    const uint16_t prog[] = {0171037u, 0002000u}; // MULF @#2000, AC0
+    deposit(001000, prog, 2);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0040700u, (uint16_t)(cpu->fac[0] >> 48)); // 6.0
+}
+
+static void test_divf_divides_two_single_floats(void) {
+    // AC0 = 6.0 ; DIVF @#2000 (2.0) -> 3.0 (high word 040500)
+    cpu->fac[0] = 0x41C0000000000000ULL; // 6.0
+    pdp11_mem_write_word(cpu->mem, 0002000u, 0040400u); // 2.0
+    pdp11_mem_write_word(cpu->mem, 0002002u, 0u);
+    const uint16_t prog[] = {0174437u, 0002000u}; // DIVF @#2000, AC0
+    deposit(001000, prog, 2);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0040500u, (uint16_t)(cpu->fac[0] >> 48)); // 3.0
+}
+
+static void test_divf_by_zero_traps_through_the_fpe_vector(void) {
+    // FPE vector 244 -> handler 3000; AC0 = 2.0 ; DIVF @#2000 (0.0) -> trap
+    pdp11_mem_write_word(cpu->mem, 0000244u, 0003000u);
+    pdp11_mem_write_word(cpu->mem, 0000246u, 0u);
+    cpu->fac[0] = 0x4100000000000000ULL; // 2.0
+    pdp11_mem_write_word(cpu->mem, 0002000u, 0u); // 0.0
+    pdp11_mem_write_word(cpu->mem, 0002002u, 0u);
+    const uint16_t prog[] = {0174437u, 0002000u}; // DIVF @#2000, AC0
+    deposit(001000, prog, 2);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0003000u, cpu->r[7]);  // vectored to the handler
+    TEST_ASSERT_EQUAL_HEX16(4u, cpu->fec);         // FEC_DZRO
+    TEST_ASSERT_EQUAL_HEX16(0001000u, cpu->fea);   // faulting DIVF address
+    TEST_ASSERT_TRUE(cpu->fps & 0100000u);         // FPS_ER
+}
+
+static void test_cmpf_sets_n_when_the_source_is_below_the_accumulator(void) {
+    // AC0 = 3.0 ; CMPF @#2000 (2.0): fsrc 2.0 < fac 3.0 -> N set
+    cpu->fac[0] = 0x4140000000000000ULL; // 3.0
+    pdp11_mem_write_word(cpu->mem, 0002000u, 0040400u); // 2.0
+    pdp11_mem_write_word(cpu->mem, 0002002u, 0u);
+    const uint16_t prog[] = {0173437u, 0002000u}; // CMPF @#2000, AC0
+    deposit(001000, prog, 2);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_TRUE(cpu->fps & 0000010u);  // FP N set (source below accumulator)
+    TEST_ASSERT_FALSE(cpu->fps & 0000004u); // FP Z clear (unequal)
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -622,5 +672,9 @@ int main(void) {
     RUN_TEST(test_ldf_stf_round_trip_a_single_through_an_accumulator);
     RUN_TEST(test_negf_flips_the_sign_of_an_accumulator);
     RUN_TEST(test_addf_adds_two_single_floats);
+    RUN_TEST(test_mulf_multiplies_two_single_floats);
+    RUN_TEST(test_divf_divides_two_single_floats);
+    RUN_TEST(test_divf_by_zero_traps_through_the_fpe_vector);
+    RUN_TEST(test_cmpf_sets_n_when_the_source_is_below_the_accumulator);
     return UNITY_END();
 }

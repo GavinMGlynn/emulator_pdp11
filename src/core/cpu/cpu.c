@@ -1137,10 +1137,40 @@ static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
 #define FPS_N  0000010u
 #define FPS_Z  0000004u
 #define FPS_V  0000002u
-#define FPS_D  0000200u // 0 = single, 1 = double
+#define FPS_C  0000001u
+#define FPS_T  0000040u // truncate (no rounding)
 #define FPS_L  0000100u // 0 = short integer, 1 = long
+#define FPS_D  0000200u // 0 = single, 1 = double
+#define FPS_IV 0001000u // interrupt on overflow
+#define FPS_IU 0002000u // interrupt on underflow
+#define FPS_ID 0040000u // interrupt disable
+#define FPS_ER 0100000u // error
 #define FPS_RW 0147757u // writable FPS bits (SimH FPS_RW)
 #define FP_SIGNBIT (1ULL << 63)
+
+// FP number fields, as they sit in the high 32 bits of the packed accumulator.
+#define FP_V_EXP  23
+#define FP_M_EXP  0377u
+#define FP_EXP_MASK (FP_M_EXP << FP_V_EXP)
+#define FP_BIAS   0200u
+
+#define FEC_DZRO  4  // divide by zero
+#define VEC_FPE   0244u // floating-point exception trap vector
+
+// Post an FP exception: set FPS_ER, FEC, FEA and (unless FPS_ID inhibits it)
+// trap through the FPE vector. `entry_pc` is the PC just past the FP opcode
+// word (SimH backup_PC), so FEA — the faulting instruction's address — is
+// entry_pc - 2. Called after the instruction's own side effects are committed,
+// matching SimH, where fpnotrap arms a trap serviced at the next dispatch.
+static void do_trap(pdp11_cpu *cpu, uint16_t vector);
+static void post_fpe(pdp11_cpu *cpu, int fec, uint16_t entry_pc) {
+    cpu->fps |= FPS_ER;
+    cpu->fec = (uint16_t)fec;
+    cpu->fea = (uint16_t)(entry_pc - 2u);
+    if ((cpu->fps & FPS_ID) == 0) {
+        do_trap(cpu, VEC_FPE);
+    }
+}
 
 // A floating value is held in a 64-bit accumulator as word0<<48 | word1<<32 |
 // word2<<16 | word3, i.e. big-endian memory-word order (word0 = lowest address).
@@ -1226,13 +1256,16 @@ static void write_fp(pdp11_cpu *cpu, fp_op o, int len_words, uint64_t v) {
 }
 
 // FP11 instruction decode (top nibble 017). P5a: control group. P5b: load/store
-// (LDf/STf) and CLR/TST/ABS/NEG. Arithmetic (ADD/SUB/MUL/DIV, conversions) and
-// the exception model are P5c.
+// (LDf/STf) and CLR/TST/ABS/NEG. P5c: full arithmetic (ADD/SUB/MUL/DIV/MOD/CMP),
+// the LDC/STC/LDEXP/STEXP conversions, and the FEC/FEA + FPE-trap exception model.
 static void op_fp11(pdp11_cpu *cpu, uint16_t word) {
     int major = (word >> 8) & 017;
     int subop = (word >> 6) & 03;
     uint8_t spec = (uint8_t)(word & 077u);
     int len = (cpu->fps & FPS_D) ? 4 : 2;
+    int olen = (len == 4) ? 2 : 4;              // the "other" precision length
+    int ilen = (cpu->fps & FPS_L) ? 2 : 1;      // integer length, in words
+    uint16_t entry_pc = cpu->r[PDP11_PC];       // SimH backup_PC (past opcode)
 
     switch (major) {
     case 000:
@@ -1309,6 +1342,7 @@ static void op_fp11(pdp11_cpu *cpu, uint16_t word) {
         break;
     }
 
+    case 002:   // MULf
     case 004:   // ADDf
     case 006: { // SUBf
         int ac = (word >> 6) & 03;
@@ -1319,19 +1353,219 @@ static void op_fp11(pdp11_cpu *cpu, uint16_t word) {
             fsrc ^= FP_SIGNBIT;
         }
         int vflag = 0, fec = 0;
-        uint64_t r = pdp11_fp_add(cpu->fac[ac], fsrc, cpu->fps, &vflag, &fec);
+        uint64_t r = (major == 002)
+                         ? pdp11_fp_mul(cpu->fac[ac], fsrc, cpu->fps, &vflag, &fec)
+                         : pdp11_fp_add(cpu->fac[ac], fsrc, cpu->fps, &vflag, &fec);
         cpu->fac[ac] = r;
         cpu->fps = fp_setcc(cpu->fps, r, (uint16_t)(vflag ? FPS_V : 0));
         if (fec) {
-            cpu->fec = (uint16_t)fec;
-            cpu->fea = (uint16_t)(cpu->r[PDP11_PC] - 2u); // FP instruction addr
-            cpu->fps |= 0100000u; // FPS_ER
+            post_fpe(cpu, fec, entry_pc);
+        }
+        break;
+    }
+
+    case 011: { // DIVf
+        int ac = (word >> 6) & 03;
+        fp_op o = decode_fp(cpu, spec, len);
+        uint64_t fsrc = read_fp(cpu, o, len);
+        if (fp_exp(fsrc) == 0) { // divide by zero: always traps
+            post_fpe(cpu, FEC_DZRO, entry_pc);
+        } else {
+            int vflag = 0, fec = 0;
+            uint64_t r = pdp11_fp_div(cpu->fac[ac], fsrc, cpu->fps, &vflag, &fec);
+            cpu->fac[ac] = r;
+            cpu->fps = fp_setcc(cpu->fps, r, (uint16_t)(vflag ? FPS_V : 0));
+            if (fec) {
+                post_fpe(cpu, fec, entry_pc);
+            }
+        }
+        break;
+    }
+
+    case 003: { // MODf: integer part -> FR[ac|1], fraction -> FR[ac]
+        int ac = (word >> 6) & 03;
+        fp_op o = decode_fp(cpu, spec, len);
+        uint64_t fsrc = read_fp(cpu, o, len);
+        uint64_t intpart = 0;
+        int vflag = 0, fec = 0;
+        uint64_t frac =
+            pdp11_fp_mod(cpu->fac[ac], fsrc, cpu->fps, &intpart, &vflag, &fec);
+        cpu->fac[ac | 1] = intpart;
+        cpu->fac[ac] = frac;
+        cpu->fps = fp_setcc(cpu->fps, frac, (uint16_t)(vflag ? FPS_V : 0));
+        if (fec) {
+            post_fpe(cpu, fec, entry_pc);
+        }
+        break;
+    }
+
+    case 007: { // CMPf: compare fsrc against fac
+        int ac = (word >> 6) & 03;
+        fp_op o = decode_fp(cpu, spec, len);
+        uint64_t fsrc = read_fp(cpu, o, len);
+        int zero_ac = 0;
+        uint16_t cc = pdp11_fp_cmp(cpu->fac[ac], fsrc, cpu->fps, &zero_ac);
+        cpu->fps = (uint16_t)((cpu->fps & ~FPS_CC) | cc);
+        if (zero_ac) {
+            cpu->fac[ac] = 0;
+        }
+        break;
+    }
+
+    case 017: { // LDCff': load, converting from the other precision
+        int ac = (word >> 6) & 03;
+        fp_op o = decode_fp(cpu, spec, olen);
+        uint64_t v = read_fp(cpu, o, olen);
+        if (fp_exp(v) == 0) {
+            v = 0;
+        }
+        int vflag = 0, fec = 0;
+        // Round only when narrowing double -> single (single mode, not truncate).
+        if ((cpu->fps & (FPS_D | FPS_T)) == 0) {
+            v = pdp11_fp_round(v, cpu->fps, &vflag, &fec);
+        }
+        cpu->fac[ac] = v;
+        cpu->fps = fp_setcc(cpu->fps, v, (uint16_t)(vflag ? FPS_V : 0));
+        if (fec) {
+            post_fpe(cpu, fec, entry_pc);
+        }
+        break;
+    }
+
+    case 014: { // STCff': store, converting to the other precision
+        int ac = (word >> 6) & 03;
+        uint64_t v = cpu->fac[ac];
+        if ((cpu->fps & FPS_D) == 0) {
+            v &= 0xFFFFFFFF00000000ULL; // single: low words are zero
+        }
+        if (fp_exp(v) == 0) {
+            v = 0;
+        }
+        int vflag = 0, fec = 0;
+        // Round only when narrowing double -> single (double mode, not truncate).
+        if ((cpu->fps & (FPS_D | FPS_T)) == FPS_D) {
+            v = pdp11_fp_round(v, cpu->fps, &vflag, &fec);
+        }
+        fp_op o = decode_fp(cpu, spec, olen);
+        write_fp(cpu, o, olen, v);
+        cpu->fps = fp_setcc(cpu->fps, v, (uint16_t)(vflag ? FPS_V : 0));
+        if (fec) {
+            post_fpe(cpu, fec, entry_pc);
+        }
+        break;
+    }
+
+    case 015: { // LDEXP: load exponent from an integer word operand
+        int ac = (word >> 6) & 03;
+        operand s = decode_operand(cpu, spec, false);
+        uint16_t dst = read_operand(cpu, s, false);
+        uint64_t fac = cpu->fac[ac];
+        uint32_t h = (uint32_t)(fac >> 32);
+        h = (h & ~FP_EXP_MASK)
+            | ((((uint32_t)dst + FP_BIAS) & FP_M_EXP) << FP_V_EXP);
+        uint64_t v = ((uint64_t)h << 32) | (fac & 0xFFFFFFFFu);
+        uint16_t newv = 0;
+        int fec = 0;
+        // dst is a signed exponent; out-of-range values over/underflow.
+        if (dst > 0177u && dst <= 0177600u) {
+            if (dst < 0100000u) { // too-large positive exponent -> overflow
+                if ((cpu->fps & FPS_IV) == 0) {
+                    v = 0;
+                } else {
+                    fec = 8; // FEC_OVFLO
+                }
+                newv = FPS_V;
+            } else { // too-negative exponent -> underflow
+                if ((cpu->fps & FPS_IU) == 0) {
+                    v = 0;
+                } else {
+                    fec = 10; // FEC_UNFLO
+                }
+            }
+        }
+        cpu->fac[ac] = v;
+        cpu->fps = fp_setcc(cpu->fps, v, newv);
+        if (fec) {
+            post_fpe(cpu, fec, entry_pc);
+        }
+        break;
+    }
+
+    case 012: { // STEXP: store exponent to an integer word operand
+        int ac = (word >> 6) & 03;
+        uint16_t dst = (uint16_t)((fp_exp(cpu->fac[ac]) - FP_BIAS) & 0177777u);
+        uint16_t cc = 0;
+        if (dst & 0100000u) {
+            cc |= FPS_N;
+        }
+        if (dst == 0) {
+            cc |= FPS_Z;
+        }
+        // STEXP writes both the FP and the CPU condition codes (SimH sets the
+        // N/Z/V/C globals here as well as FPS).
+        cpu->fps = (uint16_t)((cpu->fps & ~FPS_CC) | cc);
+        cpu->psw = (uint16_t)((cpu->psw & ~017u) | cc);
+        operand d = decode_operand(cpu, spec, false);
+        write_operand(cpu, d, false, dst);
+        break;
+    }
+
+    case 016: { // LDCif: integer -> float
+        int ac = (word >> 6) & 03;
+        fp_op o = decode_fp(cpu, spec, ilen);
+        uint32_t ival;
+        if (o.is_reg) {
+            ival = (uint32_t)cpu->r[o.reg] << 16; // register source: word only
+        } else if (o.imm) {
+            ival = (uint32_t)o.immw << 16;
+        } else {
+            uint32_t hi = cpu_read_word(cpu, o.addr);
+            uint32_t lo =
+                (ilen == 2) ? cpu_read_word(cpu, (uint16_t)(o.addr + 2u)) : 0;
+            ival = (hi << 16) | lo;
+        }
+        uint64_t v = pdp11_fp_ldcif(ival, cpu->fps);
+        cpu->fac[ac] = v;
+        cpu->fps = fp_setcc(cpu->fps, v, 0);
+        break;
+    }
+
+    case 013: { // STCfi: float -> integer
+        int ac = (word >> 6) & 03;
+        int cflag = 0, fec = 0;
+        uint32_t dst = pdp11_fp_stcfi(cpu->fac[ac], cpu->fps, &cflag, &fec);
+        uint16_t cc = 0;
+        if (dst & 0x80000000u) {
+            cc |= FPS_N;
+        }
+        if (dst == 0) {
+            cc |= FPS_Z;
+        }
+        if (cflag) {
+            cc |= FPS_C;
+        }
+        // STCfi writes both the FP and the CPU condition codes (SimH sets the
+        // N/Z/V/C globals here as well as FPS).
+        cpu->fps = (uint16_t)((cpu->fps & ~FPS_CC) | cc);
+        cpu->psw = (uint16_t)((cpu->psw & ~017u) | cc);
+        fp_op o = decode_fp(cpu, spec, ilen);
+        if (o.is_reg) {
+            cpu->r[o.reg] = (uint16_t)((dst >> 16) & 0177777u);
+        } else {
+            cpu_write_word(cpu, o.addr, (uint16_t)((dst >> 16) & 0177777u));
+            if (ilen == 2) {
+                cpu_write_word(cpu, (uint16_t)(o.addr + 2u),
+                               (uint16_t)(dst & 0177777u));
+            }
+        }
+        if (fec) {
+            post_fpe(cpu, fec, entry_pc);
         }
         break;
     }
 
     default:
-        break; // MUL/DIV/CMP/MOD, conversions — later P5c increments
+        break;
     }
 }
 

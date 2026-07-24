@@ -38,6 +38,12 @@ Status values: `open` · `confirmed` (matches oracle) · `fixed` · `divergence`
 
 | `fpadd` (P5c): ADDF 1.0+1.0=2.0, SUBF 2.0-1.0=1.0 (single) | mem[4020]=040400, mem[4024]=040200 | SimH 11/70 identical | confirmed | src/core/fp is a faithful port of SimH addfp11/round_and_pack (guard bits, rounding); results match bit-for-bit. |
 
+| `fparith` (P5c): MULF 2·3=6, DIVF 6/2=3, CMPF, MODF 3·0.5→int 1.0+frac 0.5, LDCIF/STCFI int round-trip, STEXP, LDEXP 1.0→4.0 (single) | mem[4100]=040700, [4104]=040500, [4110]=10, [4114]=040200, [4120]=040000, [4124]=5, [4134]=040600, PSW=4 | SimH 11/70 identical | confirmed | Ports mulfp11/frac_mulfp11/divfp11/modfp11/roundfp11 and the LDC/STC/LDEXP/STEXP conversions. Oracle discipline caught two of my own bugs: hand-encoded float octals were wrong (harmless — golden is self-consistent — but fixed for clarity), and STEXP/STCfi write the **CPU** PSW condition codes too (final PSW differed until replicated). |
+
+| `fpdbl` (P5c): DIVD 2.0/3.0 (fills the 56-bit mantissa), MULD ·3.0 round-trip, CMPD (double) | mem[5100..5116] = SimH's exact 4-word 0.666… bits | SimH 11/70 identical | confirmed | Exercises the double-precision paths (frac_mulfp11 24×56 loop, divfp11 long quotient loop) the single-precision `fparith` probe does not reach. |
+
+| `fpe` (P5c): DIVF by 0.0 → FPE trap; handler STST saves FEC/FEA; R0 stays 0 | mem[4100]=4 (FEC_DZRO), [4102]=01006 (FEA=DIVF addr), R0=0, R7=02006 | SimH 11/70 identical | confirmed | Validates the exception model: fpnotrap semantics (over/underflow suppressed unless enabled), FEC/FEA posting, FEA = opcode address (SimH backup_PC-2), and the FPE vector 0244 dispatch. Documented tail: the FEC_UNDFV/IUV "dirty zero" NOP is not yet posted (identical with IUV disabled). |
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|
