@@ -237,14 +237,21 @@ real-output check) are exercised there.
       **Result:** our core boots the V6 image to the `@` prompt (RK DMA + CPU +
       DL11 all working under real boot code, PC matching SimH's input-wait loop),
       echoes `unix`, and runs into the kernel.
-- [~] **P7c** Drive our core to console parity with SimH. **Current stall:** after
-      `unix`, the kernel loads and runs but hangs in a linked-list traversal at
-      kernel virtual PC 064512-064530 (`BIT #1000,(R4) / BNE / MOV 6(R4),R4 /
-      CMP #017116,R4 / BNE`) — R4 never reaches the sentinel, i.e. a corrupt
-      kernel structure. Points to a device-DMA or CPU-edge bug that only real
-      driver code exercises; the next step is the attached-disk SimH memory-diff
-      (the standing P6 tail) to localise the first divergent word. Diff is on
-      console *content* (SimH's clock is wall-clock-timed, not cycle-accurate).
+- [~] **P7c** Drive our core to console parity with SimH. **Diagnosis so far:**
+      after `unix`, the kernel loads/runs but eventually hangs walking the buffer
+      cache `av_forw` free list (kernel PC 064512-064530: `BIT #1000,(R4); MOV
+      6(R4),R4; CMP #017116,R4; BNE` — checking `B_DELWRI`, sentinel `&bfreelist`
+      = 017116). A memory diff against SimH (via `SET CPU HISTORY` + `RUNLIMIT` +
+      `BREAK` + `EXAMINE`) shows our kernel-data regions are almost entirely zero
+      where SimH's are populated — even `bfreelist` (017124) is raw zero, not the
+      empty-list sentinel. So **`binit()` never ran before we reach that code**:
+      an *earlier control-flow divergence* (a CPU-edge or MMU bug that sends a
+      branch the wrong way), not a device-DMA corruption. **Next:** a proper
+      trace-aligner (the input-wait and disk-wait spin loops break instruction-
+      count alignment between our trace and SimH's `SHOW CPU HISTORY`) to pin the
+      first divergent instruction. Methodology (SimH history/breakpoint/examine +
+      our `--boot-rk` boot) is established. Diff is on console *content* (SimH's
+      clock is wall-clock-timed, not cycle-accurate).
 - *Verify:* console TTY stream diffed vs SimH booting the same image **[A]/[C]**.
 
 ## P8 — Interactive SDL3 frontend
