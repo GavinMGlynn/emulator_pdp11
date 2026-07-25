@@ -350,6 +350,20 @@ This is the tightest the bug has been bracketed. (Boot-to-`login:` thermometer
 remains met; every subsystem probe byte-identical to SimH; this is deep
 chase-the-PC territory in the V6 tty/sleep interaction.)
 
+**RESOLVED (2026-07-25) — P7d was a frontend input race, not a CPU bug.** The
+seventh-pass lead was decisive: with the correct proc-struct offset (`p_wchan` at
++022, 026-byte stride), the dumped proc table shows getty (pid 9) **does** sleep
+on `p_wchan = 041362` (the tty channel) — but only *after* the char's
+`wakeup(041362)` already fired and found no waiter. A **lost wakeup**: our
+`--dialog` typed `root` the instant `login: ` appeared, before getty issued its
+`read()` and slept, so the character (and its wakeup) was delivered too early and
+missed. Proof: delaying the reply until getty settles makes V6 log in and run
+`echo`/`ls /`, **byte-identical to SimH**. So the CPU, MMU, Unibus Map, devices,
+traps, interrupts, and scheduler are all correct — the fix is purely the harness:
+pace `--dialog` input in emulated time (settle after a prompt, then one key per
+inter-key interval). Every gated trace and probe along the way matched SimH; the
+"bug" never lived in the core. **P7 content boot: complete.**
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|

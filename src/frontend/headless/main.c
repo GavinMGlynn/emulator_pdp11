@@ -206,21 +206,38 @@ static int run_boot(const char *disk_path, uint64_t max_instr,
     uint8_t pend[128];      // bytes queued to type for the current step
     size_t pend_len = 0, pend_pos = 0;
 
+    // Dialog input is paced in emulated time, like a real terminal: after a
+    // prompt matches we pause before "typing" so the program has time to issue
+    // its read() and sleep on the tty (typing the instant the prompt string
+    // appears races the reader and the character is lost), then type one
+    // character per inter-key interval. Values are generous defaults for a
+    // human at a console; overridable for tests.
+    uint64_t settle_ns = getenv("DLG_SETTLE_NS")
+                             ? strtoull(getenv("DLG_SETTLE_NS"), NULL, 10)
+                             : 2000000000ull; // 2 s of guest time to settle
+    uint64_t key_ns = getenv("DLG_KEY_NS")
+                          ? strtoull(getenv("DLG_KEY_NS"), NULL, 10)
+                          : 100000000ull;    // 0.1 s between keystrokes
+    uint64_t next_key_ns = 0;
     for (uint64_t i = 0; i < max_instr && !cpu->halted; ++i) {
         pdp11_cpu_step(cpu);
         if (cpu->tti_csr & DL11_DONE) {
             continue; // receiver still holds a byte — nothing to feed yet
         }
-        if (in_pos < in_len) { // naive script
+        if (in_pos < in_len) { // naive script: fed as fast as the receiver drains
             pdp11_console_input(cpu, input[in_pos++]);
         } else if (pend_pos < pend_len) { // typing the current step's reply
-            pdp11_console_input(cpu, pend[pend_pos++]);
+            if (cpu->time_ns >= next_key_ns) {
+                pdp11_console_input(cpu, pend[pend_pos++]);
+                next_key_ns = cpu->time_ns + key_ns;
+            }
         } else if (cur < nsteps && tail_ends_with(&cs, steps[cur].expect)) {
             memcpy(pend, steps[cur].send, steps[cur].send_len);
             pend_len = steps[cur].send_len;
             pend_pos = 0;
             cs.len = 0; // consume the matched output so it can't re-trigger
             ++cur;
+            next_key_ns = cpu->time_ns + settle_ns; // let the reader settle first
         }
     }
     fprintf(stderr, "\n[boot: halted=%d instr=%llu pc=%06o]\n",

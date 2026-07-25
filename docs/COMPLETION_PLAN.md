@@ -309,21 +309,31 @@ real-output check) are exercised there.
     reaches the multi-user `login:` prompt** (`@unix\r\n\n\rlogin: `). Also strip
     console parity (V6 sends even parity in bit 7; a 7-bit terminal drops it, as
     SimH does) so the stream matches the oracle.
-- [~] **P7d** Reach a root shell + diff a command session. **Prompt-aware input
-      done:** `--dialog "exp|snd|exp|snd…"` (expect/send, like SimH) waits for each
-      prompt before typing. It reaches `login: ` and delivers `root\r`, which the
-      kernel receives and reads via the DL11 RX interrupt (verified). **Blocker:**
-      after reading the login name the kernel emits *no* console output (no echo,
-      no shell) and sits in a repeated disk-**write** loop over blocks 2/7/8 (in
-      50M instr: block 7 written 133×, 8 70×, 2 66× — far above SimH's periodic
-      sync). Localised (via kernel PARs → real physical → disassembly) to V6
-      **`swtch()`** scanning the 50-entry proc table for a runnable in-core
-      process: the kernel context-switches continually and a selected process
-      keeps writing inode blocks. Deep V6 scheduler/daemon behaviour, not a
-      core-subsystem gap (all probes match SimH; boot reaches `login:`). *Next:*
-      identify the writing process (proc entry at 041576) and whether its writes
-      are retries (completion bug) or a never-cleared dirty buffer, vs SimH.
-      *Verify:* TTY stream vs SimH **[C]**.
+- [x] **P7d** Reach a root shell + diff a command session — **DONE.** `--dialog
+      "exp|snd|exp|snd…"` (expect/send, like SimH) drives the console: it boots to
+      `login: `, logs in `root`, and runs `echo`/`ls /`, with the **full session
+      byte-identical to SimH** (`ls /` → `bin dev etc lib mnt mnt2 rkunix
+      rkunix.40 tmp unix usr usr2`). The long hunt from `login:` to the shell
+      confirmed the **CPU/kernel were correct**: the block was a *frontend* input
+      race — typing the reply the instant the prompt string appeared beat the
+      program's `read()`/tty-sleep (a lost wakeup: getty's `p_wchan` = the tty
+      channel 041362, but the char's `wakeup(041362)` fired before it slept). Fix:
+      **pace `--dialog` input in emulated time** — after a prompt matches, wait a
+      settle interval so the reader issues its `read()` and sleeps, then type one
+      key per inter-key interval (defaults 2 s / 0.1 s guest time; `DLG_SETTLE_NS`
+      /`DLG_KEY_NS` override). *Verified:* TTY stream vs SimH **[C]** — identical.
+  - *Investigation trail (localised across ~12 passes, all reference-first vs
+    SimH):* NXM abort → interrupt-acknowledge → Unibus Map carried the boot to
+    `login:`; then gated per-instruction traces of *both* emulators (anchored at
+    the RBUF read) narrowed the shell block to the kernel `wakeup` scan at 033140
+    and finally to the input-timing race above. No CPU/device probe ever diverged
+    from SimH.
+- *Verify:* console TTY stream diffed vs SimH booting the same image **[A]/[C]**.
+
+**P7 — COMPLETE.** V6 boots to an interactive root shell; console session
+byte-identical to the SimH oracle. Boots are thermometers (per CLAUDE.md): this
+one exercises CPU + KT11 MMU + Unibus Map + cache + RK/DL11/KW11-L + the full
+trap/interrupt/scheduler path under real OS code, all matching SimH.
 - *Verify:* console TTY stream diffed vs SimH booting the same image **[A]/[C]**.
 
 ## P8 — Interactive SDL3 frontend
