@@ -372,3 +372,22 @@ inter-key interval). Every gated trace and probe along the way matched SimH; the
 | EIS data-dependent timing: ASH .75us + .15us/shift, ASHC .90us + .15us/shift (NOTE I); DIV .90us by-zero, +6.15us for a real divide (shortest 7.05us) | ASH by 5 = 1500ns; DIV 100/7 = 7050ns; DIV/0 = 900ns | Handbook App. C.1.7, NOTE (I) + the MUL/DIV table (PDF p. 272) | confirmed vs tables | Base EF in the timing module; the per-shift / per-operand part added at execution via cpu->eis_extra_ns. **PROVISIONAL for a real DIV**: the Handbook gives only a range (7.05-8.55us; the per-operand microcode span is unpublished), so the shortest is modelled. |
 | FP11-C timing: 450 ns preinteraction + address calc + per-instruction FP execution time (LDF 360, ADDF/SUBF 900, MULF 1800, DIVF 1920, MULD 3060, DIVD 3120, etc.) | LDFPS R0 = 630 ns (450+180); FP base (LDFPS) = 450 ns | Handbook App. C.2 (FP execution-time table + preinteraction 450 ns) | confirmed vs table (representative) | Per-instruction FP time via fp_exec_ns(); the CPU/FP parallel-processing overlap ("Wait Time") is NOT modelled, so this is the non-overlapped upper bound. **PROVISIONAL**: data-dependent FP ops (ADD/SUB/MUL/DIV/MOD) use the shortest of the published range. |
 | P4a instruction timing: SRC/DST address time + Execute/Fetch time | ADD R/R=300ns; CLR (R0)=1500ns; MOV to PC=600ns; etc. | PDP-11/70 Handbook 1977-78, App. C.1.5-C.1.7 (PDF pp. 269-271) | confirmed vs tables | Times in ns (handbook us x1000). **Manual self-inconsistency found:** the ADD mode-6/6 *worked example* (C.1.3) totals 2.55 us (EF 1.35), but the *tables* give SRC .60 + DST .60 + EF 1.20 = 2.40 us. We implement the tables and treat the example as an errata. |
+
+---
+
+**P4d verification research (2026-07-25) — decision: no per-cycle core.** Before
+building a per-processor-clock `tick()` core, we researched what could *verify*
+it, since our architectural oracle (SimH) models no timing. Result: **no runnable
+cycle-accurate KB11-C oracle exists.** (1) SimH is instruction-level, zero cycle
+model. (2) The w11a FPGA PDP-11/70 (wfjm, https://wfjm.github.io/home/w11/) is
+cycle-accurate but a *different* microarchitecture — MUL 5 cycles vs the KB11-C's
+22, DIV 23 vs 46 — so not a faithful KB11-C timing oracle. (3) MAINDEC-11-DEQKC
+(11/70 CPU exerciser) tests correctness, not cycles. The only per-cycle reference
+is paper: the KB11-C flow diagrams + Processor Manual EK-KB11C-TM-001 (150 ns
+micro-cycle); the Handbook App. C times we already match are exactly those
+microcode cycles × 150 ns (w11a confirms: reg-reg 2 cyc = 300 ns, MUL 22 cyc =
+3.30 us, DIV 46 cyc ≈ 6.9 us). A per-cycle core's one *novel* output — emergent
+DMA/BR bus contention — has **no oracle at all** (Handbook App. C NOTE 2 excludes
+NPR/BR serving from its times). **Decision (user-confirmed):** the completion-time
+device model is the design; it already matches every published KB11-C timing
+number, and a per-cycle core could add only unverifiable contention timing.

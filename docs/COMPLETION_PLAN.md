@@ -131,13 +131,25 @@ recovery) and stack-limit yellow/red.
       (total time = cpu->time_ns + cache.misses*1020). Hardware random replacement
       is modeled by a deterministic round-robin victim (documented). **[T]**
       cache_suite (4 cases); architectural goldens unchanged (cache is timing-only).
-- [ ] **P4d → folded into P6** Reference `tick()` core for emergent DMA/bus
-      contention, the Unibus map, and RH70 Massbus. These are device-coupled: the
-      handbook times exclude NRP/BR serving (NOTE 2), so contention only exists
-      once a device does DMA. They are therefore built with the devices in P6,
-      where they can be exercised and verified — a dependency-driven re-sequence,
-      not skipped work. Instruction + cache timing (P4a-c) gives cycle-accurate
-      non-DMA timing now.
+- [x] **P4d — DECIDED (2026-07-25): the completion-time model IS the design; a
+      per-cycle `tick()` core is not built.** A literal per-processor-clock
+      micro-cycle core was evaluated and deliberately not pursued, on evidence:
+      **no runnable cycle-accurate KB11-C oracle exists** to verify it against.
+      Web research (recorded in FINDINGS): SimH is instruction-level with *no*
+      timing; the w11a FPGA (wfjm) is cycle-accurate but a *different*
+      microarchitecture (MUL 5 cyc vs the KB11-C's 22, DIV 23 vs 46), so not a
+      faithful oracle; the MAINDEC-11-DEQKC 11/70 exerciser tests correctness,
+      not cycles. The only per-cycle reference is paper (the KB11-C flow diagrams
+      / EK-KB11C-TM-001, 150 ns micro-cycle), and the Handbook App. C times we
+      already match *are* those microcode cycles × 150 ns. Crucially, the one
+      thing a per-cycle core would add — **emergent DMA/BR bus contention** — is
+      exactly what has no oracle: Handbook App. C NOTE 2 explicitly excludes
+      NPR/BR serving from its times. So a per-cycle core could not be verified to
+      a higher standard than the completion-time model already achieves, while its
+      novel output would be unverifiable. Devices therefore schedule a DMA
+      completion in emulated time (a `done_ns` + poll) that sets DONE and raises
+      the interrupt; the transfer itself is functional. Instruction + cache timing
+      (P4a-c) gives cycle-accurate non-DMA timing, every number Handbook-cited.
 
 **P4 (CPU cycle timing) COMPLETE** for the non-DMA case: instruction timing
 (SRC/DST/EF from the Handbook) + the KB11-C cache, every number cited in FINDINGS.
