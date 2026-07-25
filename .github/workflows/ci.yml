@@ -26,11 +26,16 @@ jobs:
     runs-on: ubuntu-latest
     container: rockylinux:9
     steps:
+      # git must exist BEFORE checkout, or actions/checkout falls back to a
+      # tarball download (no .git) and the submodule update then fails with
+      # "not a git repository". The base image ships without git.
+      - run: dnf install -y git
       - uses: actions/checkout@v4
+      - run: git config --global --add safe.directory '*'
       - run: |
           dnf install -y dnf-plugins-core
           dnf config-manager --set-enabled crb
-          dnf install -y clang cmake ninja-build git python3
+          dnf install -y clang cmake ninja-build python3
       - run: git submodule update --init ext/unity
       - run: cmake --preset linux-ci && cmake --build --preset linux-ci
       - run: ctest --preset linux-ci --output-on-failure

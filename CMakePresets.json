@@ -70,6 +70,10 @@
     { "name": "linux-ci",      "configurePreset": "linux-ci",      "output": { "outputOnFailure": true } },
     { "name": "linux-release", "configurePreset": "linux-release", "output": { "outputOnFailure": true } },
     { "name": "macos-ci",      "configurePreset": "macos-ci",      "output": { "outputOnFailure": true } },
-    { "name": "windows-ci",    "configurePreset": "windows-ci",    "output": { "outputOnFailure": true } }
+    { "name": "macos-debug",   "configurePreset": "macos-debug",   "output": { "outputOnFailure": true } },
+    { "name": "macos-release", "configurePreset": "macos-release", "output": { "outputOnFailure": true } },
+    { "name": "windows-ci",    "configurePreset": "windows-ci",    "output": { "outputOnFailure": true } },
+    { "name": "windows-debug", "configurePreset": "windows-debug", "output": { "outputOnFailure": true } },
+    { "name": "windows-release", "configurePreset": "windows-release", "output": { "outputOnFailure": true } }
   ]
 }
