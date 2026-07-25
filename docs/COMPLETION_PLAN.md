@@ -15,7 +15,9 @@ Verification legend: **[A]** = architectural diff vs SimH oracle;
 - [x] `ext/` submodules: Unity, SDL3 (pending), SimH oracle built.
 - [x] Headless frontend; SimH oracle harness; `regress.py` golden in CTest.
 - [x] CPU seed: MOV/ADD/HALT + all addressing modes. **[A]** golden `add3`.
-- [ ] GitHub Actions 4-target matrix green. *(committed; awaiting first push)*
+- [x] GitHub Actions 4-target matrix green (linux, rocky, macos, windows) — the
+      repo is public; CI builds `ext/unity` and runs the probe/golden + unit
+      suites on the `-ci` and `-release` presets on every push.
 
 ## P1 — CPU integer core
 - [x] **P1a** All single/double-operand instructions (CLR/COM/INC/DEC/NEG/TST/
