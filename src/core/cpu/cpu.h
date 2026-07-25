@@ -144,6 +144,12 @@ void pdp11_cpu_reset(pdp11_cpu *cpu);
 // produce a bit-identical hash to the reference core at every checkpoint.
 uint64_t pdp11_state_hash(const pdp11_cpu *cpu);
 
+// The earliest emulated time (ns) at which a scheduled subsystem event is due
+// (line clock, console transmit, or disk/tape completion), or UINT64_MAX if
+// nothing is pending. During WAIT the CPU idle-skips straight to this time
+// instead of spinning; exposed so a frontend/harness can reason about idle.
+uint64_t pdp11_next_event_ns(const pdp11_cpu *cpu);
+
 // Fetch, decode, and execute exactly one instruction. A HALT sets `halted` and
 // leaves the PC past the HALT word; further steps while halted are no-ops.
 void pdp11_cpu_step(pdp11_cpu *cpu);

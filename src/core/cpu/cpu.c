@@ -1867,6 +1867,60 @@ static void op_fp11(pdp11_cpu *cpu, uint16_t word) {
     }
 }
 
+// --- Scheduled-event servicing / idle-skip (P9b) ----------------------------
+// Service every subsystem whose scheduled completion is due at the current
+// emulated time: the KW11-L line clock, the DL11 transmitter, and the RK/RP/TM
+// controllers. Each poll is a no-op unless time_ns has reached its deadline, so
+// this is safe to call after every instruction and after an idle-skip jump. The
+// clock ticks at most once per call (matching the pre-idle-skip behaviour — an
+// instruction never spans more than one line-clock period).
+static void service_due_events(pdp11_cpu *cpu) {
+    if (cpu->clk_tick_ns && cpu->time_ns >= cpu->clk_next_ns) {
+        pdp11_clk_tick(cpu);
+        cpu->clk_next_ns += cpu->clk_tick_ns;
+    }
+    if (cpu->tto_busy) {
+        pdp11_console_tx_poll(cpu);
+    }
+    if (cpu->rk.busy) {
+        pdp11_rk_poll(cpu);
+    }
+    if (cpu->rp.busy) {
+        pdp11_rp_poll(cpu);
+    }
+    if (cpu->tm.busy) {
+        pdp11_tm_poll(cpu);
+    }
+}
+
+// The earliest emulated time at which a scheduled subsystem event is due: the
+// next line-clock tick, a pending disk/tape transfer completion, or a console-
+// transmit completion. UINT64_MAX means nothing is scheduled — in that state a
+// WAIT can only be broken by fresh external input, so emulated time does not
+// advance. This is the fast-mode scheduler's next_event(): a WAIT jumps straight
+// here instead of spinning one instruction-time at a time. Servicing the event
+// it names, then re-stepping, is bit-identical to advancing in tiny increments
+// (the polls gate on time_ns >= deadline, and nothing else changes while idle).
+uint64_t pdp11_next_event_ns(const pdp11_cpu *cpu) {
+    uint64_t t = UINT64_MAX;
+    if (cpu->clk_tick_ns && cpu->clk_next_ns < t) {
+        t = cpu->clk_next_ns;
+    }
+    if (cpu->tto_busy && cpu->tto_done_ns < t) {
+        t = cpu->tto_done_ns;
+    }
+    if (cpu->rk.busy && cpu->rk.done_ns < t) {
+        t = cpu->rk.done_ns;
+    }
+    if (cpu->rp.busy && cpu->rp.done_ns < t) {
+        t = cpu->rp.done_ns;
+    }
+    if (cpu->tm.busy && cpu->tm.done_ns < t) {
+        t = cpu->tm.done_ns;
+    }
+    return t;
+}
+
 void pdp11_cpu_step(pdp11_cpu *cpu) {
     if (cpu->halted) {
         return;
@@ -1910,14 +1964,19 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
             return;
         }
     }
-    // WAIT idles the processor until an interrupt arrives. Advance emulated time
-    // to the next line-clock tick so the clock can break the wait (a real WAIT
-    // is released by the next interrupt); without a running clock, stay idle.
+    // WAIT idles the processor until an interrupt arrives. Rather than spin one
+    // instruction-time at a time, jump emulated time straight to the earliest
+    // scheduled event of ANY subsystem (idle-skip) and service it; the interrupt
+    // it raises is granted at the top of the next step, breaking the wait. If
+    // nothing is scheduled, only fresh external input can release the wait, so
+    // stay idle without advancing time.
     if (cpu->waiting) {
-        if (cpu->clk_tick_ns) {
-            cpu->time_ns = cpu->clk_next_ns;
-            pdp11_clk_tick(cpu);
-            cpu->clk_next_ns += cpu->clk_tick_ns;
+        uint64_t next = pdp11_next_event_ns(cpu);
+        if (next != UINT64_MAX) {
+            if (next > cpu->time_ns) {
+                cpu->time_ns = next;
+            }
+            service_due_events(cpu);
         }
         return;
     }
@@ -1986,25 +2045,7 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
     cpu->time_ns += ns;
     cpu->instr_count++;
 
-    // KW11-L line clock: tick once per line-frequency period of emulated time.
-    if (cpu->clk_tick_ns && cpu->time_ns >= cpu->clk_next_ns) {
-        pdp11_clk_tick(cpu);
-        cpu->clk_next_ns += cpu->clk_tick_ns;
-    }
-    // DL11 transmitter: complete a pending character transmit.
-    if (cpu->tto_busy) {
-        pdp11_console_tx_poll(cpu);
-    }
-    // RK11: complete a scheduled disk transfer.
-    if (cpu->rk.busy) {
-        pdp11_rk_poll(cpu);
-    }
-    // RH70 + RP04: complete a scheduled disk transfer.
-    if (cpu->rp.busy) {
-        pdp11_rp_poll(cpu);
-    }
-    // TM11: complete a scheduled tape operation.
-    if (cpu->tm.busy) {
-        pdp11_tm_poll(cpu);
-    }
+    // Service any subsystem completion (clock tick, console transmit, disk/tape
+    // transfer) that came due during this instruction.
+    service_due_events(cpu);
 }

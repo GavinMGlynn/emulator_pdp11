@@ -240,9 +240,9 @@ static int run_boot(const char *disk_path, uint64_t max_instr,
             next_key_ns = cpu->time_ns + settle_ns; // let the reader settle first
         }
     }
-    fprintf(stderr, "\n[boot: halted=%d instr=%llu pc=%06o]\n",
+    fprintf(stderr, "\n[boot: halted=%d instr=%llu pc=%06o hash=%016llx]\n",
             cpu->halted ? 1 : 0, (unsigned long long)cpu->instr_count,
-            cpu->r[PDP11_PC]);
+            cpu->r[PDP11_PC], (unsigned long long)pdp11_state_hash(cpu));
     pdp11_cpu_destroy(cpu);
     free(disk);
     return 0;

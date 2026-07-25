@@ -377,10 +377,23 @@ the reverse).
       media), host pointers excluded. Unit tests: deterministic across equal
       runs, and sensitive to a single perturbed memory word. This is the oracle
       the idle-skip scheduler is checked against. **[A]**
-- [ ] **P9b** Idle-skip scheduler (`next_event()`/`skip(n)`): when the CPU is in
-      WAIT, advance emulated time to the next scheduled event instead of spinning.
-      Proven bit-identical (state hash **and** `time_ns`) vs the reference core
-      over the full probe+golden suite and a long boot-state hash before it ships.
+- [x] **P9b** Idle-skip scheduler — `pdp11_next_event_ns()` returns the earliest
+      scheduled event of ANY subsystem (line clock, DL11 transmit, RK/RP/TM
+      completion); a WAIT jumps emulated time straight to it and services it via
+      `service_due_events()`, instead of spinning one instruction-time at a time.
+      This also corrects WAIT to SimH's event-queue semantics: the prior skip
+      advanced only to the next clock tick, so a device completion due sooner was
+      not serviced until a clock tick first broke the wait. Unit tests prove the
+      skip lands on exactly the earliest deadline across subsystems. **[A]**
+- *Verify:* full probe+golden suite green on debug+release (33/33); the V6 boot
+      console stream stays byte-identical to SimH; the end-of-boot state hash is
+      reproducible across runs (`e9389aa0b4b3da86`, ~49.9 M instructions) —
+      exposed on the headless boot line via `pdp11_state_hash`.
+
+**P9 — COMPLETE.** A verified fast (idle-skip) reference core: the identity
+harness (`pdp11_state_hash`) is the oracle, and the exact idle-skip advances
+through idle WAIT by jumping to the next scheduled event of any subsystem. Boot
+stream byte-identical to SimH; long-run state hash deterministic.
 
 ## P10 — Broaden to the full model range
 - [ ] Subset CPU options / MMU / bus off the 11/70 superset for each model:

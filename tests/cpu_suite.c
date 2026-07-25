@@ -1064,6 +1064,51 @@ static void test_the_state_hash_is_identical_across_two_equal_runs(void) {
     TEST_ASSERT_EQUAL_HEX64(a, b);
 }
 
+static void test_a_wait_idle_skips_straight_to_the_next_clock_tick(void) {
+    // The fast-mode idle-skip: a WAIT with only the line clock scheduled jumps
+    // emulated time directly to the next tick (no per-instruction spinning),
+    // services it, and the raised BR6 interrupt breaks the wait on the next step.
+    pdp11_mem_write_word(cpu->mem, 0000100u, 0003000u); // clock vector -> handler
+    pdp11_mem_write_word(cpu->mem, 0000102u, 0000340u);
+    cpu->r[PDP11_SP] = 0004000u;
+    cpu->psw = 0;                       // priority 0 — BR6 not masked
+    pdp11_clk_write(cpu, KW11L_IE);     // clock interrupts enabled
+    cpu->clk_next_ns = 5000u;           // next tick due at t = 5000 ns
+    cpu->time_ns = 0;
+    const uint16_t prog[] = {0000001u}; // WAIT
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);                            // WAIT executes
+    TEST_ASSERT_TRUE(cpu->waiting);
+    pdp11_cpu_step(cpu);                            // idle-skip to the tick
+    TEST_ASSERT_EQUAL_UINT64(5000u, cpu->time_ns); // landed exactly on the tick
+    TEST_ASSERT_TRUE(cpu->clk_csr & KW11L_DONE);   // clock serviced
+    pdp11_cpu_step(cpu);                            // grant breaks the wait
+    TEST_ASSERT_FALSE(cpu->waiting);
+    TEST_ASSERT_EQUAL_HEX16(0003000u, cpu->r[PDP11_PC]);
+}
+
+static void test_a_wait_idle_skips_to_a_disk_completion_before_the_clock(void) {
+    // next_event() spans every subsystem, not just the clock. With a disk
+    // transfer due before the next clock tick, the idle-skip must advance to the
+    // DISK deadline (the true earliest event) and not overshoot to the clock.
+    cpu->psw = 0;
+    cpu->time_ns = 0;
+    cpu->clk_next_ns = 100000u;         // clock far out
+    cpu->rk.busy = true;                // an RK transfer completes at t = 50000 ns
+    cpu->rk.done_ns = 50000u;           // (well after the WAIT instruction itself)
+    cpu->rk.rkcs = 0000100u;            // RKCS_IE (DONE cleared while busy)
+    const uint16_t prog[] = {0000001u}; // WAIT
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);                             // WAIT executes
+    TEST_ASSERT_TRUE(cpu->waiting);
+    TEST_ASSERT_TRUE(cpu->rk.busy);                 // disk still pending after WAIT
+    pdp11_cpu_step(cpu);                            // idle-skip to the disk
+    TEST_ASSERT_EQUAL_UINT64(50000u, cpu->time_ns);// landed on the disk deadline
+    TEST_ASSERT_FALSE(cpu->rk.busy);               // transfer finished
+    TEST_ASSERT_TRUE(cpu->rk.rkcs & 0000200u);     // RK signalled DONE (RKCS_DONE)
+    TEST_ASSERT_EQUAL_UINT64(100000u, cpu->clk_next_ns); // clock not reached/ticked
+}
+
 static void test_the_state_hash_changes_when_a_single_memory_word_differs(void) {
     // The hash must actually cover memory: flipping one word after the run
     // perturbs it. (Guards against a hash that silently ignores whole regions.)
@@ -1165,6 +1210,8 @@ int main(void) {
     RUN_TEST(test_tm11_reading_a_file_mark_sets_eof);
     RUN_TEST(test_tm11_completion_interrupts_through_224);
     RUN_TEST(test_the_state_hash_is_identical_across_two_equal_runs);
+    RUN_TEST(test_a_wait_idle_skips_straight_to_the_next_clock_tick);
+    RUN_TEST(test_a_wait_idle_skips_to_a_disk_completion_before_the_clock);
     RUN_TEST(test_the_state_hash_changes_when_a_single_memory_word_differs);
     return UNITY_END();
 }
