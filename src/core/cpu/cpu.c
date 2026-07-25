@@ -93,6 +93,12 @@ pdp11_cpu *pdp11_cpu_create_model(pdp11_model model) {
     // change the T bit; every other model (incl. the 11/70) preserves it.
     cpu->has_expt = (model == PDP11_MODEL_1104 || model == PDP11_MODEL_1105
                      || model == PDP11_MODEL_1120);
+    // Stack limit (SimH HAS_STKLR / HAS_STKLF): a programmable STKLIM register on
+    // the 11/45, 11/60, 11/70; a fixed 0400 limit on most others; neither on the
+    // 11/03.
+    cpu->has_stklr = (model == PDP11_MODEL_1145 || model == PDP11_MODEL_1160
+                      || model == PDP11_MODEL_1170);
+    cpu->has_stklf = !cpu->has_stklr && model != PDP11_MODEL_1103;
     cpu->mfpt_code = info->mfpt_code;
     cpu->psw_mask = info->psw_mask;
     cpu->mmr0_mask = info->mmr0_mask;
@@ -128,6 +134,9 @@ void pdp11_cpu_reset(pdp11_cpu *cpu) {
     cpu->halted = false;
     cpu->waiting = false;
     cpu->trace_pending = false;
+    cpu->stack_yellow_pending = false;
+    cpu->in_trap_push = false;
+    cpu->servicing_stack_trap = false;
     cpu->pirq = 0;
     cpu->abort_depth = 0;
     cpu->mmr0 = 0;
@@ -218,6 +227,7 @@ uint64_t pdp11_state_hash(const pdp11_cpu *cpu) {
     fnv1a(&h, &cpu->halted, sizeof cpu->halted);
     fnv1a(&h, &cpu->waiting, sizeof cpu->waiting);
     fnv1a(&h, &cpu->trace_pending, sizeof cpu->trace_pending);
+    fnv1a(&h, &cpu->stack_yellow_pending, sizeof cpu->stack_yellow_pending);
     fnv1a(&h, &cpu->cc_frozen, sizeof cpu->cc_frozen);
     fnv1a(&h, &cpu->pirq, sizeof cpu->pirq);
     fnv1a(&h, cpu->regfile, sizeof cpu->regfile);
@@ -314,6 +324,7 @@ static void cpu_write_byte(pdp11_cpu *cpu, uint32_t va, uint8_t value);
 static void push_word(pdp11_cpu *cpu, uint16_t value);
 static uint16_t pop_word(pdp11_cpu *cpu);
 static void do_trap(pdp11_cpu *cpu, uint16_t vector); // trap through a vector
+static void check_stack_limit(pdp11_cpu *cpu, uint16_t sp); // kernel stack yellow/red
 
 // --- Instruction fetch ------------------------------------------------------
 // Read the word at the PC and advance the PC by two.
@@ -395,10 +406,16 @@ static operand decode_operand(pdp11_cpu *cpu, uint8_t spec, bool bytemode) {
             cpu->r[reg] = (uint16_t)(cpu->r[reg] - step);
             op.addr = cpu->r[reg];
             mmr1_track(cpu, reg, -(int)step);
+            if (reg == PDP11_SP) {
+                check_stack_limit(cpu, cpu->r[reg]);
+            }
         }
         break;
     case 5: // @-(Rn) — autodecrement deferred
         cpu->r[reg] = (uint16_t)(cpu->r[reg] - 2u);
+        if (reg == PDP11_SP) {
+            check_stack_limit(cpu, cpu->r[reg]);
+        }
         op.addr = cpu_read_word(cpu, cpu->r[reg]);
         mmr1_track(cpu, reg, -2); // the pointer is always a word
         break;
@@ -437,6 +454,43 @@ static uint32_t width_carry(bool bytemode) { return bytemode ? 0400u : 0200000u;
 static void cpu_bus_fault(pdp11_cpu *cpu, uint16_t vector) {
     cpu->abort_vec = vector;
     longjmp(cpu->abort_env, 1);
+}
+
+// KB11-C stack limit. A push in Kernel mode that drives SP below the yellow
+// boundary (STKLIM + 0400, a fixed 0400 on the models without a STKLIM register)
+// arms a deferred yellow-zone trap through vector 4. On the models with a STKLIM
+// register (11/45/60/70), driving SP below the red boundary (STKLIM + 0340)
+// instead is an immediate red-zone abort: kernel SP is forced to 4 and the CPU
+// traps through vector 4. Models without any stack limit (11/03) do nothing.
+#define STKL_YEL   0400u   // yellow-zone offset above the limit
+#define STKL_RED   0340u   // red-zone offset above the limit
+#define CPUERR_RED 0004u   // CPUERR red-stack bit
+#define CPUERR_YEL 0010u   // CPUERR yellow-stack bit
+static void check_stack_limit(pdp11_cpu *cpu, uint16_t sp) {
+    if (cpu->in_trap_push || ((cpu->psw >> 14) & 03u) != 0) {
+        return; // exempt during a trap's own pushes; Kernel mode only
+    }
+    uint16_t yellow = (uint16_t)(cpu->stklim + STKL_YEL);
+    if (sp >= yellow) {
+        return; // above the yellow zone — fine
+    }
+    if (cpu->has_stklf) {
+        cpu->cpuerr |= CPUERR_YEL;       // fixed limit: always a yellow trap
+        cpu->stack_yellow_pending = true;
+    } else if (cpu->has_stklr) {
+        if (sp >= (uint16_t)(cpu->stklim + STKL_RED)) {
+            cpu->cpuerr |= CPUERR_YEL;   // yellow zone
+            cpu->stack_yellow_pending = true;
+        } else {
+            cpu->cpuerr |= CPUERR_RED;   // red zone: reset kernel SP and abort now
+            cpu->r[PDP11_SP] = 4;
+            cpu->stackfile[0] = 4;
+            cpu->servicing_stack_trap = true; // exempt the abort's own pushes
+            cpu->in_trap_push = false;        // (cleared here; do_trap re-sets it)
+            cpu_bus_fault(cpu, VEC_BUS);
+        }
+    }
+    // else (11/03): no stack limit
 }
 
 // Highest program-interrupt-request level pending (7..1), or 0 if none.
@@ -1274,6 +1328,7 @@ static bool try_single_op(pdp11_cpu *cpu, uint16_t word) {
 // --- Stack (R6) -------------------------------------------------------------
 static void push_word(pdp11_cpu *cpu, uint16_t value) {
     cpu->r[PDP11_SP] = (uint16_t)(cpu->r[PDP11_SP] - 2u);
+    check_stack_limit(cpu, cpu->r[PDP11_SP]); // red-zone aborts before the write
     cpu_write_word(cpu, cpu->r[PDP11_SP], value);
 }
 
@@ -1401,11 +1456,21 @@ static void do_trap(pdp11_cpu *cpu, uint16_t vector) {
     // The new PSW's previous-mode field records the mode we trapped from.
     new_psw = (uint16_t)((new_psw & ~0030000u) | ((uint32_t)old_mode << 12));
     // Switch mode/register set first, then push the old state on the new stack.
+    // The trap's own pushes are exempt from the stack-limit check (SimH does the
+    // check once at the end, guarded against re-triggering on a stack trap).
     put_psw(cpu, new_psw);
+    cpu->in_trap_push = true;
     push_word(cpu, old_psw);
     push_word(cpu, old_pc);
+    cpu->in_trap_push = false;
     cpu->r[PDP11_PC] = new_pc;
     cpu->mmr0 |= MMR0_IC; // instruction-complete bit, set on trap dispatch
+    // After the pushes, a Kernel stack now in the yellow zone arms a warning
+    // trap — unless this trap was itself a stack trap (SimH's trapnum guard),
+    // which would otherwise loop.
+    if (!cpu->servicing_stack_trap) {
+        check_stack_limit(cpu, cpu->r[PDP11_SP]);
+    }
 }
 
 // RTI/RTT: pop PC then PSW. On the 11/70 an RTI (but not RTT) that restores the
@@ -2148,6 +2213,16 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
         do_trap(cpu, VEC_BPT);
         return;
     }
+    // A kernel yellow-zone stack push last instruction arms a warning trap
+    // through vector 4, serviced before the next instruction (lower priority
+    // than the trace trap above; the red zone already aborted immediately).
+    if (cpu->stack_yellow_pending) {
+        cpu->stack_yellow_pending = false;
+        cpu->servicing_stack_trap = true;
+        do_trap(cpu, VEC_BUS);
+        cpu->servicing_stack_trap = false;
+        return;
+    }
     // Hardware interrupt: grant the highest pending request whose level exceeds
     // the current CPU priority (PSW bits 7-5). Traps outrank interrupts, so this
     // follows the trace check. Both program-interrupt (PIR) and device (BR)
@@ -2211,6 +2286,7 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
             return;
         }
         do_trap(cpu, cpu->abort_vec);
+        cpu->servicing_stack_trap = false; // cleared after a red-stack abort's trap
         cpu->instr_count++;
         return;
     }

@@ -76,6 +76,8 @@ typedef struct pdp11_cpu {
     bool has_eis, has_fpp, has_mmu, has_ubm;
     bool has_sxs, has_mark, has_rtt, has_spl;
     bool has_expt; // explicit PSW writes (via 0177776) can alter the T bit
+    bool has_stklr; // programmable stack limit (STKLIM): 11/45, 11/60, 11/70
+    bool has_stklf; // fixed 0400 stack limit: 11/04/05/20, F, 34, 40, 44, J
     uint16_t mfpt_code;
     uint16_t psw_mask; // writable PSW bits for this model
     uint16_t mmr0_mask, mmr3_mask, par_mask, pdr_mask; // KT11 register masks
@@ -85,6 +87,9 @@ typedef struct pdp11_cpu {
     bool halted;   // set by HALT until the next reset
     bool waiting;  // set by WAIT; cleared when an interrupt is granted
     bool trace_pending; // a T-bit trace trap is due before the next instruction
+    bool stack_yellow_pending; // a kernel yellow-zone stack trap is due next
+    bool in_trap_push;         // inside a trap's own PSW/PC pushes (limit-exempt)
+    bool servicing_stack_trap; // the trap being taken is itself a stack trap
     // Set when an instruction writes the PSW as its destination (via 0177776):
     // the written value defines the condition codes, so the instruction's own
     // CC update is suppressed for the rest of that instruction (matches SimH,
