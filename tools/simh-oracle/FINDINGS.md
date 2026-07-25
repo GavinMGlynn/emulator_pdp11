@@ -199,6 +199,27 @@ a targeted RK-write trace. (SimH console capture in batch mode is unreliable —
 `expect`/`send` don't echo to stdout or `set console log`; use `SET RK DEBUG=OPS`
 and `send after=<instr>`.)
 
+**Update (2026-07-25 cont.).** Confirmed against SimH: SimH **idles quietly** at
+`login:` (230 RK ops total for the whole boot; blocks 7/8 written only 6-9× over
+~2 min wall, i.e. the periodic `update` daemon), whereas ours writes block 7
+**133×** in ~50M instr — genuinely abnormal. Dumped the V6 proc table (virtual
+05206, page 0 = identity/physical) with `root\r` sent: proc[0]=swapper (SSYS),
+proc[1]=init (SWAIT), proc[2] SWAIT (likely the console getty, **still asleep**
+after the line is sent), and **proc[4] = SRUN + SLOAD (pri 0206) — a runnable,
+resident process that swtch runs continually**. Tracing the exact moment `root\r`
+is read shows the CPU is *in swtch()* (034316 loop 7097× in 60k instr — a context
+switch every ~8 instructions): proc[4] runs a few instructions, blocks (a write?),
+and is immediately rescheduled, thrashing and emitting the inode writes, while the
+console getty is starved and never reads the line. So the login blocker is a
+**runaway resident process (proc[4])**, not the tty terminator. Most likely a
+getty/daemon spinning on a resource our environment doesn't model (e.g. a second
+tty line in `/etc/ttys`, or a device open that errors-and-retries). *Next:* read
+proc[4]'s p_pid/p_addr, map its u-area to find the program and the syscall it
+loops on (open/write on what), and check whether `/etc/ttys` names ttys with no
+backing device. This is a V6 environment/scheduler tail — every CPU/MMU/device
+probe is byte-identical to SimH and the boot reaches `login:` (the P7
+thermometer), so it does not gate the emulator's verified correctness.
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|
