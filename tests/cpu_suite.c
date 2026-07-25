@@ -1183,6 +1183,58 @@ static void test_a_model_without_fpp_traps_fp11_instructions_as_reserved(void) {
     TEST_ASSERT_NOT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1170, 0170001u));
 }
 
+// Run one instruction on a fresh model CPU and report R0 (for MFPT, which
+// returns the processor-type code there).
+static uint16_t r0_after_step_on_model(pdp11_model m, uint16_t opcode) {
+    pdp11_cpu *c = pdp11_cpu_create_model(m);
+    TEST_ASSERT_NOT_NULL(c);
+    c->r[PDP11_SP] = 0002000u;
+    c->r[PDP11_PC] = 001000u;
+    pdp11_mem_write_word(c->mem, 001000u, opcode);
+    pdp11_cpu_step(c);
+    uint16_t r0 = c->r[PDP11_R0];
+    pdp11_cpu_destroy(c);
+    return r0;
+}
+
+static void test_the_earliest_machines_lack_the_extended_base_set(void) {
+    // SXT/SOB/XOR/MARK arrived after the 11/20; on it they trap through vector 10
+    // (SimH gates them by HAS_SXS / HAS_MARK, which exclude the 11/04/05/20).
+    TEST_ASSERT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1120, 0006700u)); // SXT
+    TEST_ASSERT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1120, 0077000u)); // SOB
+    TEST_ASSERT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1120, 0074000u)); // XOR
+    TEST_ASSERT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1120, 0006400u)); // MARK
+    // The 11/70 has them all.
+    TEST_ASSERT_NOT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1170, 0006700u));
+    TEST_ASSERT_NOT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1170, 0077000u));
+    TEST_ASSERT_NOT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1170, 0074000u));
+}
+
+static void test_rtt_is_absent_on_the_11_20_but_present_on_the_11_04(void) {
+    // HAS_RTT excludes only the 11/05 and 11/20; the 11/04 already has RTT.
+    TEST_ASSERT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1120, 0000006u));
+    TEST_ASSERT_NOT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1104, 0000006u));
+}
+
+static void test_spl_is_only_on_the_44_45_70_and_j_class(void) {
+    // HAS_SPL = 11/44, 11/45, 11/70, J-class; reserved on everything else.
+    TEST_ASSERT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1120, 0000230u));
+    TEST_ASSERT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1134, 0000230u));
+    TEST_ASSERT_NOT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1170, 0000230u));
+    TEST_ASSERT_NOT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1153, 0000230u));
+}
+
+static void test_mfpt_returns_the_model_code_where_present_and_traps_otherwise(void) {
+    // MFPT returns a processor-type code in R0 on the F-class (3), 11/44 (1) and
+    // J-class (5); it is reserved elsewhere — including on the 11/70, which
+    // predates MFPT (SimH HAS_MFPT excludes CPUT_70).
+    TEST_ASSERT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1170, 0000007u)); // reserved
+    TEST_ASSERT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1120, 0000007u)); // reserved
+    TEST_ASSERT_EQUAL_HEX16(1u, r0_after_step_on_model(PDP11_MODEL_1144, 0000007u));
+    TEST_ASSERT_EQUAL_HEX16(3u, r0_after_step_on_model(PDP11_MODEL_1123, 0000007u));
+    TEST_ASSERT_EQUAL_HEX16(5u, r0_after_step_on_model(PDP11_MODEL_1153, 0000007u));
+}
+
 static void test_the_11_34_has_eis_but_no_fpp(void) {
     // A mid-range subset: EIS present, FP11 absent by default (matches SimH's
     // SOP_1134 = EIS|MMU, FPP only in the toggleable option set).
@@ -1290,6 +1342,10 @@ int main(void) {
     RUN_TEST(test_an_11_20_traps_eis_instructions_as_reserved);
     RUN_TEST(test_an_11_70_executes_eis_rather_than_trapping);
     RUN_TEST(test_a_model_without_fpp_traps_fp11_instructions_as_reserved);
+    RUN_TEST(test_the_earliest_machines_lack_the_extended_base_set);
+    RUN_TEST(test_rtt_is_absent_on_the_11_20_but_present_on_the_11_04);
+    RUN_TEST(test_spl_is_only_on_the_44_45_70_and_j_class);
+    RUN_TEST(test_mfpt_returns_the_model_code_where_present_and_traps_otherwise);
     RUN_TEST(test_the_11_34_has_eis_but_no_fpp);
     RUN_TEST(test_model_memory_ceilings_follow_the_address_width);
     return UNITY_END();

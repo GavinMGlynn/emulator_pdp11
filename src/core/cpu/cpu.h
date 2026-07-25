@@ -51,6 +51,13 @@ typedef struct {
     bool has_fpp;       // FP11 floating-point processor
     bool has_mmu;       // KT11 memory management
     bool has_ubm;       // 18-bit Unibus map (22-bit Unibus models)
+    // Base-instruction-set additions absent on the earliest machines (SimH
+    // HAS_SXS / HAS_MARK / HAS_RTT / HAS_SPL). SXS = SXT, SOB and XOR.
+    bool has_sxs;       // SXT / SOB / XOR (absent on 11/04, 11/05, 11/20)
+    bool has_mark;      // MARK          (absent on 11/04, 11/05, 11/20)
+    bool has_rtt;       // RTT           (absent on 11/05, 11/20)
+    bool has_spl;       // SPL           (only 11/44, 11/45, 11/70, J-class)
+    uint16_t mfpt_code; // MFPT type code returned in R0, or 0 if MFPT is absent
     uint32_t max_mem;   // physical memory ceiling in bytes (64 KiB / 256 KiB / 4 MiB)
     uint16_t psw_mask;  // writable PSW bits (narrower on modeless low-end machines)
 } pdp11_model_info;
@@ -63,6 +70,8 @@ typedef struct pdp11_cpu {
     // state — excluded from the state hash). Default create() is the 11/70.
     pdp11_model model;
     bool has_eis, has_fpp, has_mmu, has_ubm;
+    bool has_sxs, has_mark, has_rtt, has_spl;
+    uint16_t mfpt_code;
 
     uint16_t r[8]; // R0-R7 (kernel set; alternate set + modes land later)
     uint16_t psw;  // processor status word

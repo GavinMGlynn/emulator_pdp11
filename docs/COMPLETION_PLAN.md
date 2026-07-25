@@ -406,9 +406,15 @@ stream byte-identical to SimH; long-run state hash deterministic.
       (MUL/DIV/ASH/ASHC) and **FP11** trap through vector 10 on models without
       them (matches SimH `if (!CPUO(OPT_EIS)) setTRAP(TRAP_ILL)`); per-model
       **memory ceiling** (64 KiB / 256 KiB / 4 MiB by address width). **[A]**
-- [ ] **P10b** Base-instruction-set subsetting for the earliest machines: SOB,
-      SXT, XOR, MARK, RTT, SPL, ASH (non-EIS) absent on 11/20 / 11/05 / 11/04 /
-      11/03 (SimH gates these by `CPUT_20`/`CPUT_05`). MFPT per model.
+- [x] **P10b** Base-instruction-set subsetting for the earliest machines. Added
+      `has_sxs` (SXT/SOB/XOR), `has_mark`, `has_rtt`, `has_spl` and an `mfpt_code`
+      to the model table, transcribed from SimH's `HAS_SXS/HAS_MARK/HAS_RTT/`
+      `HAS_SPL/HAS_MFPT` masks. Each opcode traps through vector 10 on a model
+      that lacks it: the extended base set (SXT/SOB/XOR/MARK) on the 11/04/05/20,
+      RTT on the 11/05/20, SPL on all but 11/44/45/70 + J-class. MFPT returns the
+      processor-type code in R0 where present (F-class 3, 11/44 1, J-class 5) and
+      is reserved elsewhere — including on the 11/70, which predates it. Per-model
+      unit tests; V6 boot hash unchanged (`e9389aa0b4b3da86`). **[A]**
 - [ ] **P10c** MMU presence: on a no-MMU model (11/20/05/04/03) MMR0-2, PAR/PDR,
       and the mode/regset PSW bits do not exist — accesses are NXM, PSW writes
       mask to `psw_mask`. 16/18/22-bit relocation width per model; Unibus map only

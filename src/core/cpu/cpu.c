@@ -36,27 +36,27 @@
 #define MEM_256K 0001000000u // 256 KiB (2**18)
 #define MEM_4M   0020000000u //   4 MiB (2**22)
 static const pdp11_model_info k_model_tab[PDP11_MODEL_COUNT] = {
-    //  name       eis    fpp    mmu    ubm    max_mem   psw_mask
-    { "11/03",  false, false, false, false, MEM_64K,  0000377u },
-    { "11/04",  false, false, false, false, MEM_64K,  0000377u },
-    { "11/05",  false, false, false, false, MEM_64K,  0000377u },
-    { "11/20",  false, false, false, false, MEM_64K,  0000377u },
-    { "11/23",  true,  true,  true,  false, MEM_4M,   0170777u },
-    { "11/23+", true,  true,  true,  false, MEM_4M,   0170777u },
-    { "11/24",  true,  true,  true,  true,  MEM_4M,   0170777u },
-    { "11/34",  true,  false, true,  false, MEM_256K, 0170377u },
-    { "11/40",  true,  false, true,  false, MEM_256K, 0170377u },
-    { "11/44",  true,  true,  true,  true,  MEM_4M,   0170777u },
-    { "11/45",  true,  true,  true,  false, MEM_256K, 0174377u },
-    { "11/53",  true,  true,  true,  false, MEM_4M,   0174777u },
-    { "11/60",  true,  true,  true,  false, MEM_256K, 0170377u },
-    { "11/70",  true,  true,  true,  true,  MEM_4M,   0174377u },
-    { "11/73",  true,  true,  true,  false, MEM_4M,   0174777u },
-    { "11/73B", true,  true,  true,  false, MEM_4M,   0174777u },
-    { "11/83",  true,  true,  true,  false, MEM_4M,   0174777u },
-    { "11/84",  true,  true,  true,  false, MEM_4M,   0174777u },
-    { "11/93",  true,  true,  true,  false, MEM_4M,   0174777u },
-    { "11/94",  true,  true,  true,  false, MEM_4M,   0174777u },
+    //  name       eis    fpp    mmu    ubm    sxs    mark   rtt    spl   mfpt max_mem   psw_mask
+    { "11/03",  false, false, false, false, true,  true,  true,  false, 0, MEM_64K,  0000377u },
+    { "11/04",  false, false, false, false, false, false, true,  false, 0, MEM_64K,  0000377u },
+    { "11/05",  false, false, false, false, false, false, false, false, 0, MEM_64K,  0000377u },
+    { "11/20",  false, false, false, false, false, false, false, false, 0, MEM_64K,  0000377u },
+    { "11/23",  true,  true,  true,  false, true,  true,  true,  false, 3, MEM_4M,   0170777u },
+    { "11/23+", true,  true,  true,  false, true,  true,  true,  false, 3, MEM_4M,   0170777u },
+    { "11/24",  true,  true,  true,  true,  true,  true,  true,  false, 3, MEM_4M,   0170777u },
+    { "11/34",  true,  false, true,  false, true,  true,  true,  false, 0, MEM_256K, 0170377u },
+    { "11/40",  true,  false, true,  false, true,  true,  true,  false, 0, MEM_256K, 0170377u },
+    { "11/44",  true,  true,  true,  true,  true,  true,  true,  true,  1, MEM_4M,   0170777u },
+    { "11/45",  true,  true,  true,  false, true,  true,  true,  true,  0, MEM_256K, 0174377u },
+    { "11/53",  true,  true,  true,  false, true,  true,  true,  true,  5, MEM_4M,   0174777u },
+    { "11/60",  true,  true,  true,  false, true,  true,  true,  false, 0, MEM_256K, 0170377u },
+    { "11/70",  true,  true,  true,  true,  true,  true,  true,  true,  0, MEM_4M,   0174377u },
+    { "11/73",  true,  true,  true,  false, true,  true,  true,  true,  5, MEM_4M,   0174777u },
+    { "11/73B", true,  true,  true,  false, true,  true,  true,  true,  5, MEM_4M,   0174777u },
+    { "11/83",  true,  true,  true,  false, true,  true,  true,  true,  5, MEM_4M,   0174777u },
+    { "11/84",  true,  true,  true,  false, true,  true,  true,  true,  5, MEM_4M,   0174777u },
+    { "11/93",  true,  true,  true,  false, true,  true,  true,  true,  5, MEM_4M,   0174777u },
+    { "11/94",  true,  true,  true,  false, true,  true,  true,  true,  5, MEM_4M,   0174777u },
 };
 
 const pdp11_model_info *pdp11_model_lookup(pdp11_model model) {
@@ -85,6 +85,11 @@ pdp11_cpu *pdp11_cpu_create_model(pdp11_model model) {
     cpu->has_fpp = info->has_fpp;
     cpu->has_mmu = info->has_mmu;
     cpu->has_ubm = info->has_ubm;
+    cpu->has_sxs = info->has_sxs;
+    cpu->has_mark = info->has_mark;
+    cpu->has_rtt = info->has_rtt;
+    cpu->has_spl = info->has_spl;
+    cpu->mfpt_code = info->mfpt_code;
     pdp11_cpu_reset(cpu);
     // Installed memory: 256 KiB by default (matching the oracle's `set cpu 256k`,
     // the V6 boot config), capped at the model's physical ceiling — so an 11/20
@@ -285,6 +290,7 @@ static uint8_t cpu_read_byte(pdp11_cpu *cpu, uint32_t va);
 static void cpu_write_byte(pdp11_cpu *cpu, uint32_t va, uint8_t value);
 static void push_word(pdp11_cpu *cpu, uint16_t value);
 static uint16_t pop_word(pdp11_cpu *cpu);
+static void do_trap(pdp11_cpu *cpu, uint16_t vector); // trap through a vector
 
 // --- Instruction fetch ------------------------------------------------------
 // Read the word at the PC and advance the PC by two.
@@ -1104,8 +1110,8 @@ static bool try_single_op(pdp11_cpu *cpu, uint16_t word) {
         single_op(cpu, word, 0003, false);
         return true;
     }
-    if (base == 0064 && !bytemode) { // MARK
-        op_mark(cpu, word);
+    if (base == 0064 && !bytemode) { // MARK (absent on 11/04, 11/05, 11/20)
+        if (cpu->has_mark) { op_mark(cpu, word); } else { do_trap(cpu, VEC_RESERVED); }
         return true;
     }
     if (base == 0065) { // MFPI (I-space) / MFPD (D-space, byte-flagged)
@@ -1120,8 +1126,9 @@ static bool try_single_op(pdp11_cpu *cpu, uint16_t word) {
         single_op(cpu, word, base, bytemode);
         return true;
     }
-    if (!bytemode && base == 0067) { // SXT (word)
-        single_op(cpu, word, 0067, false);
+    if (!bytemode && base == 0067) { // SXT (absent on 11/04, 11/05, 11/20)
+        if (cpu->has_sxs) { single_op(cpu, word, 0067, false); }
+        else { do_trap(cpu, VEC_RESERVED); }
         return true;
     }
     // Not on the 11/70 / handled elsewhere: MARK (word 0064), MFPI/MTPI/MFPD/
@@ -1181,7 +1188,6 @@ static void op_branch(pdp11_cpu *cpu, uint16_t word, uint16_t hb) {
     }
 }
 
-static void do_trap(pdp11_cpu *cpu, uint16_t vector); // defined below
 
 // --- Control transfer -------------------------------------------------------
 // JMP dst: PC := effective address of dst. A register operand has no address, so
@@ -1417,8 +1423,11 @@ static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
         op_rts(cpu, word);
     } else if (word >= 0000230 && word <= 0000237) {
         // SPL: set the CPU priority (PSW<7:5>) from the low 3 bits. Privileged —
-        // it only takes effect in Kernel mode; elsewhere it is a no-op (11/70).
-        if (((cpu->psw >> 14) & 03u) == 0) {
+        // it only takes effect in Kernel mode; elsewhere it is a no-op. Present
+        // only on the 11/44, 11/45, 11/70 and J-class; reserved elsewhere.
+        if (!cpu->has_spl) {
+            do_trap(cpu, VEC_RESERVED);
+        } else if (((cpu->psw >> 14) & 03u) == 0) {
             cpu->psw = (uint16_t)((cpu->psw & ~0340u) | ((word & 07u) << 5));
         }
     } else if (word >= 0000240 && word <= 0000277) {
@@ -1434,9 +1443,9 @@ static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
     } else if ((word & 0177000u) == 0073000) {
         if (cpu->has_eis) { op_ashc(cpu, word); } else { do_trap(cpu, VEC_RESERVED); }
     } else if ((word & 0177000u) == 0074000) {
-        op_xor(cpu, word);
+        if (cpu->has_sxs) { op_xor(cpu, word); } else { do_trap(cpu, VEC_RESERVED); }
     } else if ((word & 0177000u) == 0077000) {
-        op_sob(cpu, word);
+        if (cpu->has_sxs) { op_sob(cpu, word); } else { do_trap(cpu, VEC_RESERVED); }
     } else if ((word & 0177400u) == 0104000) {
         do_trap(cpu, VEC_EMT);  // EMT (104000-104377)
     } else if ((word & 0177400u) == 0104400) {
@@ -1444,7 +1453,16 @@ static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
     } else if (word == 0000002) {
         op_rti(cpu, false);     // RTI
     } else if (word == 0000006) {
-        op_rti(cpu, true);      // RTT
+        // RTT (absent on 11/05, 11/20 — reserved there)
+        if (cpu->has_rtt) { op_rti(cpu, true); } else { do_trap(cpu, VEC_RESERVED); }
+    } else if (word == 0000007) {
+        // MFPT: return the processor-type code in R0. Present only on the
+        // F-class, 11/44 and J-class; reserved (incl. on the 11/70) otherwise.
+        if (cpu->mfpt_code != 0) {
+            cpu->r[PDP11_R0] = cpu->mfpt_code;
+        } else {
+            do_trap(cpu, VEC_RESERVED);
+        }
     } else if (word == 0000003) {
         do_trap(cpu, VEC_BPT);  // BPT
     } else if (word == 0000004) {
@@ -1477,9 +1495,8 @@ static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
                || (word & 0177000u) == 0076000u) { // CIS  (not on 11/70)
         do_trap(cpu, VEC_RESERVED); // illegal instruction on the 11/70
     }
-    // Still no-ops (legal on the 11/70, implemented later): WAIT/RESET/MFPT,
-    // MARK, MFPI/MTPI/MFPD/MTPD (P3), FP11 (P5). A full illegal-instruction
-    // net tightens as those land.
+    // The illegal-instruction net is not yet exhaustive: some unassigned
+    // encodings still fall through as no-ops rather than trapping to vector 10.
 }
 
 // --- FP11-C floating point (P5) ---------------------------------------------
@@ -1512,7 +1529,6 @@ static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
 // word (SimH backup_PC), so FEA — the faulting instruction's address — is
 // entry_pc - 2. Called after the instruction's own side effects are committed,
 // matching SimH, where fpnotrap arms a trap serviced at the next dispatch.
-static void do_trap(pdp11_cpu *cpu, uint16_t vector);
 static void post_fpe(pdp11_cpu *cpu, int fec, uint16_t entry_pc) {
     cpu->fps |= FPS_ER;
     cpu->fec = (uint16_t)fec;
