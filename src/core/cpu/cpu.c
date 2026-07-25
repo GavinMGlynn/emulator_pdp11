@@ -5,6 +5,7 @@
 #include "clk/clk.h"
 #include "console/console.h"
 #include "devices/rk11.h"
+#include "devices/rl11.h"
 #include "devices/rp11.h"
 #include "devices/tm11.h"
 #include "fp/fp.h"
@@ -198,6 +199,12 @@ void pdp11_cpu_reset(pdp11_cpu *cpu) {
     cpu->tm.cmd = 0000200u; // MTC_DONE
     cpu->tm.sta = cpu->tm.bc = cpu->tm.ca = cpu->tm.db = cpu->tm.rdl = 0;
     cpu->tm.busy = false;
+    // RL11: controller ready (DONE); DRDY is computed on read from the drive
+    // state. Disk buffer preserved across reset.
+    cpu->rl.rlcs = 0000200u; // RLCS_DONE
+    cpu->rl.rlba = cpu->rl.rlda = cpu->rl.rlmp = cpu->rl.rlbae = 0;
+    cpu->rl.trk = 0;
+    cpu->rl.busy = false;
     pdp11_cache_reset(&cpu->cache);
 }
 
@@ -286,6 +293,11 @@ uint64_t pdp11_state_hash(const pdp11_cpu *cpu) {
     fnv1a(&h, &cpu->tm.wrp, sizeof cpu->tm.wrp);
     fnv1a(&h, &cpu->tm.busy, sizeof cpu->tm.busy);
     fnv1a(&h, &cpu->tm.done_ns, sizeof cpu->tm.done_ns);
+
+    fnv1a(&h, &cpu->rl.rlcs, 6u * sizeof(uint16_t)); // rlcs..trk contiguous
+    fnv1a(&h, &cpu->rl.disk_words, sizeof cpu->rl.disk_words);
+    fnv1a(&h, &cpu->rl.busy, sizeof cpu->rl.busy);
+    fnv1a(&h, &cpu->rl.done_ns, sizeof cpu->rl.done_ns);
 
     // Cache tags/valid/victim + miss count (timing state).
     fnv1a(&h, &cpu->cache, sizeof cpu->cache);
@@ -512,6 +524,7 @@ static const struct { uint8_t ipl; uint16_t vec; } int_tab[] = {
     [PDP11_INT_RK] = {RK_IPL, RK_VEC},
     [PDP11_INT_RP] = {RP_IPL, RP_VEC},
     [PDP11_INT_TM] = {TM_IPL, TM_VEC},
+    [PDP11_INT_RL] = {RL_IPL, RL_VEC},
 };
 #define NUM_INT (sizeof int_tab / sizeof int_tab[0])
 
@@ -817,6 +830,8 @@ static uint16_t io_read(pdp11_cpu *cpu, uint16_t a) {
     case TM_MTS: case TM_MTC: case TM_MTBRC:
     case TM_MTCMA: case TM_MTD: case TM_MTRD:
         return pdp11_tm_read(cpu, a); // TM11 tape
+    case RL_RLCS: case RL_RLBA: case RL_RLDA: case RL_RLMP:
+        return pdp11_rl_read(cpu, a); // RL11 disk
     default:
         if (a >= RP_CSR && a <= RP_END) {
             return pdp11_rp_read(cpu, a); // RH70 + RP04 disk
@@ -867,6 +882,8 @@ static void io_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
     case TM_MTS: case TM_MTC: case TM_MTBRC:
     case TM_MTCMA: case TM_MTD: case TM_MTRD:
         pdp11_tm_write(cpu, a, value); return; // TM11 tape
+    case RL_RLCS: case RL_RLBA: case RL_RLDA: case RL_RLMP:
+        pdp11_rl_write(cpu, a, value); return; // RL11 disk
     default:
         if (a >= RP_CSR && a <= RP_END) {
             pdp11_rp_write(cpu, a, value); return; // RH70 + RP04 disk
@@ -2200,6 +2217,9 @@ static void service_due_events(pdp11_cpu *cpu) {
     if (cpu->tm.busy) {
         pdp11_tm_poll(cpu);
     }
+    if (cpu->rl.busy) {
+        pdp11_rl_poll(cpu);
+    }
 }
 
 // The earliest emulated time at which a scheduled subsystem event is due: the
@@ -2226,6 +2246,9 @@ uint64_t pdp11_next_event_ns(const pdp11_cpu *cpu) {
     }
     if (cpu->tm.busy && cpu->tm.done_ns < t) {
         t = cpu->tm.done_ns;
+    }
+    if (cpu->rl.busy && cpu->rl.done_ns < t) {
+        t = cpu->rl.done_ns;
     }
     return t;
 }

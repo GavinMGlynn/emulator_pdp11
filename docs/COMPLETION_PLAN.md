@@ -476,6 +476,14 @@ stream byte-identical to SimH; long-run state hash deterministic.
       `CPUT_05|CPUT_20`); every later model uses the pre-increment effective
       address. Per-model unit test; 11/70 boot unchanged (hash `e9389aa0b4b3da86`).
       **[A]**
+- [x] **P10h** RL11/RL01-RL02 disk. A Unibus/Q-bus DMA disk (registers
+      0174400-0174406, BR5, vector 0160) modelled on SimH pdp11_rl.c: function
+      decode (NOP/GET-STATUS/SEEK/READ-HEADER/READ/WRITE/WCHK), 18-bit DMA
+      through the Unibus Map, completion interrupt. **[A]** `rl11` register probe
+      byte-identical to SimH (incl. RLBAE correctly NXM on Unibus, RLCS DRDY
+      computed from drive state); DMA read/write/seek/get-status/interrupt
+      unit-tested. The drive is modelled always-ready (SimH's load/spin/brush/
+      lock state machine is a documented simplification).
 - *Remaining P10 tails* (documented, low boot-relevance): Q-bus vs Unibus device
       set per model. (MMR1/MMR2 landed in P3d.) The model-selection
       superset→subset framework and every option the current core models (EIS,

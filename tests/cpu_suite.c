@@ -776,9 +776,11 @@ static void test_dl11_transmitter_emits_to_the_sink_then_completes(void) {
 // A small RK backing store: 4 sectors (1024 words) is enough to exercise the
 // DMA without allocating a whole 1.2M-word drive.
 static uint16_t rk_disk[1024];
+static uint16_t rl_disk[512];
 
 // Word count register value for an N-word transfer (two's-complement count).
 static uint16_t rk_wc(unsigned n) { return (uint16_t)(0200000u - n); }
+static uint16_t rl_wc(unsigned n) { return (uint16_t)((0200000u - n) & 0177777u); }
 
 static void test_rk11_read_transfers_a_sector_from_disk_to_memory(void) {
     for (int i = 0; i < 256; ++i) {
@@ -1030,6 +1032,69 @@ static void test_tm11_completion_interrupts_through_224(void) {
     deposit(001000, prog, 1);
     pdp11_cpu_step(cpu);
     TEST_ASSERT_EQUAL_HEX16(0003000u, cpu->r[PDP11_PC]); // vectored to handler
+}
+
+// --- RL11 / RL01-RL02 disk --------------------------------------------------
+
+static void test_rl11_read_transfers_a_sector_from_disk_to_memory(void) {
+    for (int i = 0; i < 128; ++i) {
+        rl_disk[i] = (uint16_t)(0100000u + (unsigned)i); // pattern in sector 0
+    }
+    pdp11_rl_attach(cpu, rl_disk, 512);
+    pdp11_rl_write(cpu, RL_RLBA, 0010000u);      // memory address
+    pdp11_rl_write(cpu, RL_RLDA, 0);             // track 0, sector 0
+    pdp11_rl_write(cpu, RL_RLMP, rl_wc(128));    // 128 words (one sector)
+    pdp11_rl_write(cpu, RL_RLCS, (6u << 1));     // FUNC=READ, GO (DONE clear)
+    cpu->time_ns = cpu->rl.done_ns;              // let the transfer complete
+    pdp11_rl_poll(cpu);
+    TEST_ASSERT_TRUE(cpu->rl.rlcs & 0000200u);   // DONE
+    TEST_ASSERT_EQUAL_HEX16(0100000u, pdp11_mem_read_word(cpu->mem, 0010000u));
+    TEST_ASSERT_EQUAL_HEX16(0100000u + 127u,
+                            pdp11_mem_read_word(cpu->mem, 0010000u + 127u * 2u));
+    TEST_ASSERT_EQUAL_HEX16(0u, cpu->rl.rlmp);   // word count exhausted
+}
+
+static void test_rl11_write_transfers_memory_to_disk(void) {
+    for (int i = 0; i < 128; ++i) {
+        rl_disk[i] = 0;
+        pdp11_mem_write_word(cpu->mem, 0010000u + (uint32_t)i * 2u,
+                             (uint16_t)(0040000u + (unsigned)i));
+    }
+    pdp11_rl_attach(cpu, rl_disk, 512);
+    pdp11_rl_write(cpu, RL_RLBA, 0010000u);
+    pdp11_rl_write(cpu, RL_RLDA, 0);
+    pdp11_rl_write(cpu, RL_RLMP, rl_wc(128));
+    pdp11_rl_write(cpu, RL_RLCS, (5u << 1));     // FUNC=WRITE, GO
+    cpu->time_ns = cpu->rl.done_ns;
+    pdp11_rl_poll(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0040000u, rl_disk[0]);
+    TEST_ASSERT_EQUAL_HEX16(0040000u + 127u, rl_disk[127]);
+}
+
+static void test_rl11_get_status_reports_a_ready_drive(void) {
+    pdp11_rl_attach(cpu, rl_disk, 512);          // an RL01 (small test buffer)
+    pdp11_rl_write(cpu, RL_RLDA, 0000003u);      // GS marker (bit 1) set
+    pdp11_rl_write(cpu, RL_RLCS, (2u << 1));     // FUNC=GET STATUS, GO
+    TEST_ASSERT_TRUE(cpu->rl.rlcs & 0000200u);   // instant DONE
+    // RLMP = lock-on(5) | brushes home(010) | heads out(020) = 035; not an RL02.
+    TEST_ASSERT_EQUAL_HEX16(0000035u, cpu->rl.rlmp);
+}
+
+static void test_rl11_completion_interrupts_through_160_when_enabled(void) {
+    pdp11_mem_write_word(cpu->mem, 0000160u, 0003000u); // RL vector -> handler
+    pdp11_mem_write_word(cpu->mem, 0000162u, 0000340u);
+    cpu->r[PDP11_SP] = 0004000u;
+    pdp11_rl_attach(cpu, rl_disk, 512);
+    pdp11_rl_write(cpu, RL_RLBA, 0010000u);
+    pdp11_rl_write(cpu, RL_RLDA, 0);
+    pdp11_rl_write(cpu, RL_RLMP, rl_wc(128));
+    pdp11_rl_write(cpu, RL_RLCS, (6u << 1) | 0000100u); // READ, GO, IE
+    cpu->time_ns = cpu->rl.done_ns;
+    pdp11_rl_poll(cpu);                          // completes -> requests BR5 int
+    const uint16_t prog[] = {0010000u};          // MOV R0,R0 (runs absent an int)
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0003000u, cpu->r[PDP11_PC]); // vectored to the handler
 }
 
 // --- P9 identity harness: the state hash is deterministic and complete -------
@@ -1586,6 +1651,10 @@ int main(void) {
     RUN_TEST(test_tm11_write_record_stores_to_tape);
     RUN_TEST(test_tm11_reading_a_file_mark_sets_eof);
     RUN_TEST(test_tm11_completion_interrupts_through_224);
+    RUN_TEST(test_rl11_read_transfers_a_sector_from_disk_to_memory);
+    RUN_TEST(test_rl11_write_transfers_memory_to_disk);
+    RUN_TEST(test_rl11_get_status_reports_a_ready_drive);
+    RUN_TEST(test_rl11_completion_interrupts_through_160_when_enabled);
     RUN_TEST(test_the_state_hash_is_identical_across_two_equal_runs);
     RUN_TEST(test_a_wait_idle_skips_straight_to_the_next_clock_tick);
     RUN_TEST(test_a_wait_idle_skips_to_a_disk_completion_before_the_clock);
