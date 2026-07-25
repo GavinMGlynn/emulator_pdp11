@@ -102,6 +102,15 @@ recovery) and stack-limit yellow/red.
       observationally equivalent to our per-fetch MMR2=PC (SimH overwrites the
       transient trapea at the handler's own fetch; the frozen MME case, where it
       matters, keeps the faulting instruction in both).
+- [x] **P3f** Stack-limit protection. A Kernel push below the yellow boundary
+      (STKLIM+0400) arms a deferred warning trap through vector 4 + CPUERR yellow;
+      on the 11/45/60/70 a push below the red boundary (STKLIM+0340) is an
+      immediate abort (kernel SP forced to 4). STKLIM register (0177774) on the
+      45/60/70, a fixed 0400 limit on 04/05/20/F/34/40/44/J, none on the 11/03.
+      Hooked into the `-(SP)`/`@-(SP)` modes and push_word (JSR/traps); a trap's
+      own pushes are exempt (SimH `trapnum != RED && != YEL`) so the yellow
+      handler runs. **[A]** `stklim` probe (yellow) byte-identical to SimH; the
+      red-zone catastrophic double-fault is modelled as a single trap.
 - *Verify:* fault/abort + relocation probes **[A]**; MMR status **[A]**.
 
 ## P4 — Cache + timing  ← the cycle-accuracy core
