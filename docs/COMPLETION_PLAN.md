@@ -441,9 +441,14 @@ stream byte-identical to SimH; long-run state hash deterministic.
       every other model — including the 11/70 — preserves the old T. The 11/20's
       SWAB leaves V unchanged where every later model clears it. Per-model unit
       tests; 11/70 boot unchanged (hash `e9389aa0b4b3da86`). **[A]**
+- [x] **P10g** JMP/JSR `(R)+` quirk. On the 11/05/20, a JMP or JSR with a `(R)+`
+      destination jumps to the register's *post*-increment value (SimH
+      `CPUT_05|CPUT_20`); every later model uses the pre-increment effective
+      address. Per-model unit test; 11/70 boot unchanged (hash `e9389aa0b4b3da86`).
+      **[A]**
 - *Remaining P10 tails* (documented, low boot-relevance): Q-bus vs Unibus device
-      set per model; MMR1/MMR2 modelling where present; the JMP/JSR `(R)+`
-      post-increment quirk on the 11/05/20. The model-selection
+      set per model; MMR1/MMR2 register modelling (needs a dedicated SimH arch-diff
+      probe to verify the reg-mod encoding + freeze semantics). The model-selection
       superset→subset framework and every option the current core models (EIS,
       FP11, base set, SPL/MFPT, PSW, MMU registers, Unibus map, memory ceiling)
       are subset per model and verified against SimH's `cpu_tab`.

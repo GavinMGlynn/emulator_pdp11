@@ -1218,12 +1218,25 @@ static void op_branch(pdp11_cpu *cpu, uint16_t word, uint16_t hb) {
 // JMP dst: PC := effective address of dst. A register operand has no address, so
 // on the 11/70 (which lacks HAS_JREG4) JMP/JSR to a register is illegal and
 // traps through vector 010.
+// The 11/05 and 11/20 quirk: JMP/JSR with a (R)+ destination take the register's
+// POST-increment value as the target (SimH: dst = R[reg] after autoincrement),
+// where every later model uses the pre-increment effective address. decode_operand
+// has already incremented the register, so the post-increment value is R[reg] now.
+static uint16_t jump_target(const pdp11_cpu *cpu, uint16_t word, operand dst) {
+    uint8_t spec = (uint8_t)(word & 077u);
+    if ((cpu->model == PDP11_MODEL_1105 || cpu->model == PDP11_MODEL_1120)
+        && (spec & 070u) == 020u && !dst.is_imm) { // mode 2 = (R)+
+        return cpu->r[spec & 07u];
+    }
+    return (uint16_t)dst.addr;
+}
+
 static void op_jmp(pdp11_cpu *cpu, uint16_t word) {
     operand dst = decode_operand(cpu, (uint8_t)(word & 077u), false);
     if (dst.is_reg) {
         do_trap(cpu, VEC_RESERVED);
     } else {
-        cpu->r[PDP11_PC] = (uint16_t)dst.addr;
+        cpu->r[PDP11_PC] = jump_target(cpu, word, dst);
     }
 }
 
@@ -1234,9 +1247,10 @@ static void op_jsr(pdp11_cpu *cpu, uint16_t word) {
         do_trap(cpu, VEC_RESERVED); // JSR to a register is illegal on the 11/70
         return;
     }
+    uint16_t target = jump_target(cpu, word, dst);
     push_word(cpu, cpu->r[reg]);
     cpu->r[reg] = cpu->r[PDP11_PC];
-    cpu->r[PDP11_PC] = (uint16_t)dst.addr;
+    cpu->r[PDP11_PC] = target;
 }
 
 static void op_rts(pdp11_cpu *cpu, uint16_t word) {

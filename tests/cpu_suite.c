@@ -1374,6 +1374,28 @@ static void test_swab_leaves_the_overflow_flag_unchanged_on_the_11_20(void) {
     pdp11_cpu_destroy(c70);
 }
 
+static void test_jmp_autoincrement_uses_post_increment_on_the_11_20(void) {
+    // JMP (R0)+ : the 11/20 jumps to R0 *after* the autoincrement; the 11/70 uses
+    // the pre-increment effective address. (SimH CPUT_05|CPUT_20 quirk.)
+    pdp11_cpu *c20 = pdp11_cpu_create_model(PDP11_MODEL_1120);
+    TEST_ASSERT_NOT_NULL(c20);
+    c20->r[PDP11_R0] = 0004000u;
+    c20->r[PDP11_PC] = 001000u;
+    pdp11_mem_write_word(c20->mem, 001000u, 0000120u); // JMP (R0)+
+    pdp11_cpu_step(c20);
+    TEST_ASSERT_EQUAL_HEX16(0004002u, c20->r[PDP11_PC]); // post-increment target
+    pdp11_cpu_destroy(c20);
+
+    pdp11_cpu *c70 = pdp11_cpu_create_model(PDP11_MODEL_1170);
+    TEST_ASSERT_NOT_NULL(c70);
+    c70->r[PDP11_R0] = 0004000u;
+    c70->r[PDP11_PC] = 001000u;
+    pdp11_mem_write_word(c70->mem, 001000u, 0000120u); // JMP (R0)+
+    pdp11_cpu_step(c70);
+    TEST_ASSERT_EQUAL_HEX16(0004000u, c70->r[PDP11_PC]); // pre-increment address
+    pdp11_cpu_destroy(c70);
+}
+
 static void test_model_psw_masks_match_the_reference_table(void) {
     TEST_ASSERT_EQUAL_HEX16(0000377u, pdp11_model_lookup(PDP11_MODEL_1120)->psw_mask);
     TEST_ASSERT_EQUAL_HEX16(0170377u, pdp11_model_lookup(PDP11_MODEL_1134)->psw_mask);
@@ -1480,5 +1502,6 @@ int main(void) {
     RUN_TEST(test_the_unibus_map_is_absent_on_a_model_without_it);
     RUN_TEST(test_an_explicit_psw_write_alters_t_only_on_an_expt_model);
     RUN_TEST(test_swab_leaves_the_overflow_flag_unchanged_on_the_11_20);
+    RUN_TEST(test_jmp_autoincrement_uses_post_increment_on_the_11_20);
     return UNITY_END();
 }
