@@ -57,7 +57,7 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | RP04 disk via RH70 Massbus (DMA) | **working** (P6d) | `rp11` register probe byte-identical to SimH; DMA read/write + interrupt unit tests |
 | TM11/TU10 magtape (.tap) | **working** (P6e) | `tm11` register probe byte-identical to SimH; record read/write + file-mark + interrupt unit tests |
 | Content boot (Unix V6/V7) | **boots to an interactive root shell** (P7a-d) | headless `--boot-rk` boots V6 from `@unix` to multi-user `login:`, logs in as `root`, and runs shell commands (`echo`, `ls /`) — the full console session is **byte-identical to SimH** (`ls /` → `bin dev etc lib mnt mnt2 rkunix rkunix.40 tmp unix usr usr2`). Required six real CPU/bus bugs found+fixed vs SimH (SBC-V, SPL, PSW-CC, NXM abort, interrupt-acknowledge, **Unibus Map**); the last step to the shell was a **frontend** fix — pacing the `--dialog` input in emulated time so a typed reply waits for the reader's `read()`/sleep instead of racing it (the CPU/kernel were already correct) |
-| Interactive SDL frontend | not started | — |
+| Interactive SDL frontend | **working** (P8a) | `pdp11_sdl`: SDL3 window, VT terminal on the DL11 console + KY11 lamp/RUN panel, keyboard→DL11; boots V6 to an interactive shell. Optional (pkg-config SDL3, skipped if absent). `--frames N` headless smoke test (`sdl_frontend_smoke`, dummy driver) |
 | Verified fast mode | not started | — |
 | Other models (11/20…11/94) | not started | — |
 

@@ -337,7 +337,22 @@ trap/interrupt/scheduler path under real OS code, all matching SimH.
 - *Verify:* console TTY stream diffed vs SimH booting the same image **[A]/[C]**.
 
 ## P8 — Interactive SDL3 frontend
-- [ ] VT terminal + console/switch-register panel; `--frames` bounded smoke test.
+- [x] **P8a** `pdp11_sdl` — an SDL3 window with a VT-style terminal on the DL11
+      console (80×25, scroll, CR/LF/BS/TAB, parity-stripped) plus a KY11-style
+      panel (ADDR=PC and DATA=PSW lamp rows, a RUN/HALT indicator, and a
+      PC/PSW/instruction-count readout). Keyboard `SDL_EVENT_TEXT_INPUT` +
+      Enter/Backspace/Tab/Esc feed the DL11 receiver; transmitted characters go to
+      the terminal via the same console sink the headless frontend uses — the core
+      is untouched. `--boot-rk <disk>` boots a real image (type `unix` → `login:`
+      → shell); with no disk a tiny built-in banner program runs so the window
+      isn't blank. Rendering uses SDL's built-in debug font (no asset deps); SDL3
+      is found via pkg-config and its headers are SYSTEM-included so they never
+      trip the `-Werror` warning set. The frontend is **optional** (skipped if
+      SDL3 is absent, so core/CI are unaffected). *Verify:* `--frames N` renders N
+      frames under `SDL_VIDEODRIVER=dummy` and exits 0 — wired as the CTest
+      `sdl_frontend_smoke` **[A]**; manually, it boots V6 to an interactive shell.
+- *Tails:* a switch-register/toggle row for deposit/examine and single-step;
+  resize/hi-dpi; selectable colour scheme. Not needed for the P8 thermometer.
 
 ## P9 — Verified fast mode
 - [ ] Exact-skip scheduler (`next_event()`/`skip(n)`), proven bit-identical vs the
