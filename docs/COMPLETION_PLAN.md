@@ -448,5 +448,4 @@ stream byte-identical to SimH; long-run state hash deterministic.
 core implements is subset per model and unit-tested; the 11/70 remains the full
 superset with its boot byte-identical to SimH. Residual per-model device/quirk
 detail is tracked as tails above.
-- [ ] **P10d** Remaining per-model detail + Q-bus vs Unibus device set.
 - *Verify:* per-model probes **[A]**; model-specific timing **[T]** where documented.
