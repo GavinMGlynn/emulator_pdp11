@@ -127,6 +127,12 @@ typedef struct pdp11_cpu {
     // mode 0=Kernel 1=Super 3=User (2 unused).
     uint16_t mmr0;
     uint16_t mmr3;
+    // MMR1 records the register auto-increment/decrement deltas of the current
+    // instruction (each byte = (delta<<3)|reg) so the OS can unwind them after an
+    // abort; MMR2 holds the current instruction's virtual address. Both freeze
+    // with MMR0 on a management fault, capturing the faulting instruction.
+    uint16_t mmr1;
+    uint16_t mmr2;
     uint16_t par[64];
     uint16_t pdr[64];
 

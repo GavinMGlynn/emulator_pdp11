@@ -1396,6 +1396,67 @@ static void test_jmp_autoincrement_uses_post_increment_on_the_11_20(void) {
     pdp11_cpu_destroy(c70);
 }
 
+static void test_mmr2_latches_the_current_instruction_address(void) {
+    const uint16_t prog[] = {0012700u, 0000001u}; // MOV #1, R0 at 001000
+    deposit(001000, prog, 2);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(001000u, cpu->mmr2);
+}
+
+static void test_mmr1_records_an_autoincrement_register_delta(void) {
+    // MOV (R1)+, R0 : R1 steps +2 -> MMR1 = (2<<3)|1 = 021 (SimH calc_MMR1).
+    cpu->r[PDP11_R1] = 002000u;
+    const uint16_t prog[] = {0012100u}; // MOV (R1)+, R0
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0021u, cpu->mmr1);
+}
+
+static void test_mmr1_records_two_register_deltas_first_in_the_low_byte(void) {
+    // MOV (R1)+, (R2)+ : R1 (021) lands in the low byte, R2 (022) in the high.
+    cpu->r[PDP11_R1] = 002000u;
+    cpu->r[PDP11_R2] = 003000u;
+    const uint16_t prog[] = {0012122u}; // MOV (R1)+, (R2)+
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0011021u, cpu->mmr1);
+}
+
+static void test_mmr1_records_an_autodecrement_as_a_negative_delta(void) {
+    // MOV -(R1), R0 : R1 steps -2 -> MMR1 = ((-2 & 037)<<3)|1 = 0361.
+    cpu->r[PDP11_R1] = 002000u;
+    const uint16_t prog[] = {0014100u}; // MOV -(R1), R0
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0361u, cpu->mmr1);
+}
+
+static void test_the_mmu_status_registers_do_not_track_on_a_no_mmu_model(void) {
+    pdp11_cpu *c = pdp11_cpu_create_model(PDP11_MODEL_1120);
+    TEST_ASSERT_NOT_NULL(c);
+    c->r[PDP11_R1] = 002000u;
+    c->r[PDP11_PC] = 001000u;
+    pdp11_mem_write_word(c->mem, 001000u, 0012100u); // MOV (R1)+, R0
+    pdp11_cpu_step(c);
+    TEST_ASSERT_EQUAL_HEX16(0u, c->mmr1);
+    TEST_ASSERT_EQUAL_HEX16(0u, c->mmr2);
+    pdp11_cpu_destroy(c);
+}
+
+static void test_mmr1_and_mmr2_freeze_with_mmr0(void) {
+    // With MMR0 frozen (an error bit set) the delta log and saved PC hold still,
+    // preserving the faulting instruction's snapshot for the abort handler.
+    cpu->mmr0 = 0100000u;   // NR error bit -> MMR0 frozen
+    cpu->mmr1 = 0123u;
+    cpu->mmr2 = 0004000u;
+    cpu->r[PDP11_R1] = 002000u;
+    const uint16_t prog[] = {0012100u}; // MOV (R1)+, R0
+    deposit(001000, prog, 1);
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_HEX16(0123u, cpu->mmr1);    // unchanged
+    TEST_ASSERT_EQUAL_HEX16(0004000u, cpu->mmr2); // unchanged
+}
+
 static void test_model_psw_masks_match_the_reference_table(void) {
     TEST_ASSERT_EQUAL_HEX16(0000377u, pdp11_model_lookup(PDP11_MODEL_1120)->psw_mask);
     TEST_ASSERT_EQUAL_HEX16(0170377u, pdp11_model_lookup(PDP11_MODEL_1134)->psw_mask);
@@ -1503,5 +1564,11 @@ int main(void) {
     RUN_TEST(test_an_explicit_psw_write_alters_t_only_on_an_expt_model);
     RUN_TEST(test_swab_leaves_the_overflow_flag_unchanged_on_the_11_20);
     RUN_TEST(test_jmp_autoincrement_uses_post_increment_on_the_11_20);
+    RUN_TEST(test_mmr2_latches_the_current_instruction_address);
+    RUN_TEST(test_mmr1_records_an_autoincrement_register_delta);
+    RUN_TEST(test_mmr1_records_two_register_deltas_first_in_the_low_byte);
+    RUN_TEST(test_mmr1_records_an_autodecrement_as_a_negative_delta);
+    RUN_TEST(test_the_mmu_status_registers_do_not_track_on_a_no_mmu_model);
+    RUN_TEST(test_mmr1_and_mmr2_freeze_with_mmr0);
     return UNITY_END();
 }

@@ -83,7 +83,17 @@ recovery) and stack-limit yellow/red.
       flags. A red-stack runaway guard prevents an infinite nested-abort loop
       when the kernel stack page is not resident. **[A]** `mmuabort` probe
       (write to a read-only page; handler reads MMR0=020205) byte-identical to
-      SimH. MMR1 (auto-inc/dec recovery) and MMR2 remain a small tail.
+      SimH. MMR1 (auto-inc/dec recovery) and MMR2 done in P3d.
+- [x] **P3d** MMR1 + MMR2. MMR2 latches each instruction's virtual address at the
+      top of the fetch; MMR1 logs the auto-increment/decrement register deltas of
+      the current instruction as `(delta<<3)|reg` bytes (first mod low byte, second
+      high — SimH `calc_MMR1`), skipping PC mods. Both freeze with MMR0 on a fault
+      (preserving the faulting instruction) and are inert on a no-MMU model;
+      readable at 0177574/0177576. **[A]** Encoding unit-tested against SimH's
+      formula (+2/-2/byte deltas, two-slot ordering, freeze, no-MMU). V6 boot
+      console byte-identical, instr/pc unchanged; the state hash re-baselined to
+      `da04edc609324309` now that MMR2 is part of the hashed state. *Ideal
+      follow-up:* a dedicated SimH arch-diff probe over an abort+recovery sequence.
 - *Verify:* fault/abort + relocation probes **[A]**; MMR status **[A]**.
 
 ## P4 — Cache + timing  ← the cycle-accuracy core
@@ -387,7 +397,8 @@ the reverse).
       skip lands on exactly the earliest deadline across subsystems. **[A]**
 - *Verify:* full probe+golden suite green on debug+release (33/33); the V6 boot
       console stream stays byte-identical to SimH; the end-of-boot state hash is
-      reproducible across runs (`e9389aa0b4b3da86`, ~49.9 M instructions) —
+      reproducible across runs (`e9389aa0b4b3da86` at the time; re-baselined to
+      `da04edc609324309` once MMR1/MMR2 joined the hashed state — see P3d, below) —
       exposed on the headless boot line via `pdp11_state_hash`.
 
 **P9 — COMPLETE.** A verified fast (idle-skip) reference core: the identity
@@ -447,8 +458,7 @@ stream byte-identical to SimH; long-run state hash deterministic.
       address. Per-model unit test; 11/70 boot unchanged (hash `e9389aa0b4b3da86`).
       **[A]**
 - *Remaining P10 tails* (documented, low boot-relevance): Q-bus vs Unibus device
-      set per model; MMR1/MMR2 register modelling (needs a dedicated SimH arch-diff
-      probe to verify the reg-mod encoding + freeze semantics). The model-selection
+      set per model. (MMR1/MMR2 landed in P3d.) The model-selection
       superset→subset framework and every option the current core models (EIS,
       FP11, base set, SPL/MFPT, PSW, MMU registers, Unibus map, memory ceiling)
       are subset per model and verified against SimH's `cpu_tab`.

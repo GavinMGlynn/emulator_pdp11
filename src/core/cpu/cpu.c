@@ -132,6 +132,8 @@ void pdp11_cpu_reset(pdp11_cpu *cpu) {
     cpu->abort_depth = 0;
     cpu->mmr0 = 0;
     cpu->mmr3 = 0;
+    cpu->mmr1 = 0;
+    cpu->mmr2 = 0;
     for (int i = 0; i < 32; ++i) {
         cpu->ub_map[i] = 0;
     }
@@ -221,6 +223,8 @@ uint64_t pdp11_state_hash(const pdp11_cpu *cpu) {
 
     // MMU (KT11).
     fnv1a(&h, &cpu->mmr0, sizeof cpu->mmr0);
+    fnv1a(&h, &cpu->mmr1, sizeof cpu->mmr1);
+    fnv1a(&h, &cpu->mmr2, sizeof cpu->mmr2);
     fnv1a(&h, &cpu->mmr3, sizeof cpu->mmr3);
     fnv1a(&h, cpu->par, sizeof cpu->par);
     fnv1a(&h, cpu->pdr, sizeof cpu->pdr);
@@ -327,6 +331,20 @@ static uint16_t operand_step(uint8_t reg, bool bytemode) {
     return (bytemode && reg < PDP11_SP) ? 1u : 2u;
 }
 
+// Record a register auto-increment/decrement in MMR1 (KB11-C): each mod is a
+// byte (delta<<3)|reg with a 5-bit signed delta; the first mod of the
+// instruction goes in the low byte, the second in the high byte (SimH
+// calc_MMR1). PC (reg 7) mods are not tracked, tracking is skipped on a no-MMU
+// model, and it stops once MMR0 is frozen (so the faulting instruction's deltas
+// are preserved for the abort handler).
+static void mmr1_track(pdp11_cpu *cpu, uint8_t reg, int delta) {
+    if (!cpu->has_mmu || reg == PDP11_PC || (cpu->mmr0 & 0160000u)) { // MMR0_FREEZE
+        return;
+    }
+    uint16_t enc = (uint16_t)((((uint16_t)((uint16_t)delta & 037u)) << 3) | reg);
+    cpu->mmr1 = cpu->mmr1 ? (uint16_t)((enc << 8) | cpu->mmr1) : enc;
+}
+
 static operand decode_operand(pdp11_cpu *cpu, uint8_t spec, bool bytemode) {
     uint8_t mode = (uint8_t)((spec >> 3) & 07u);
     uint8_t reg = (uint8_t)(spec & 07u);
@@ -346,8 +364,10 @@ static operand decode_operand(pdp11_cpu *cpu, uint8_t spec, bool bytemode) {
             op.is_imm = true;
             op.imm = fetch(cpu);        // value from the instruction stream
         } else {
+            uint16_t step = operand_step(reg, bytemode);
             op.addr = cpu->r[reg];
-            cpu->r[reg] = (uint16_t)(cpu->r[reg] + operand_step(reg, bytemode));
+            cpu->r[reg] = (uint16_t)(cpu->r[reg] + step);
+            mmr1_track(cpu, reg, (int)step);
         }
         break;
     case 3: // @(Rn)+ — autoincrement deferred  (PC: absolute @#A, A from I-space)
@@ -356,15 +376,21 @@ static operand decode_operand(pdp11_cpu *cpu, uint8_t spec, bool bytemode) {
         } else {
             op.addr = cpu_read_word(cpu, cpu->r[reg]); // pointer is data (D-space)
             cpu->r[reg] = (uint16_t)(cpu->r[reg] + 2u);
+            mmr1_track(cpu, reg, 2); // the pointer is always a word
         }
         break;
     case 4: // -(Rn) — autodecrement
-        cpu->r[reg] = (uint16_t)(cpu->r[reg] - operand_step(reg, bytemode));
-        op.addr = cpu->r[reg];
+        {
+            uint16_t step = operand_step(reg, bytemode);
+            cpu->r[reg] = (uint16_t)(cpu->r[reg] - step);
+            op.addr = cpu->r[reg];
+            mmr1_track(cpu, reg, -(int)step);
+        }
         break;
     case 5: // @-(Rn) — autodecrement deferred
         cpu->r[reg] = (uint16_t)(cpu->r[reg] - 2u);
         op.addr = cpu_read_word(cpu, cpu->r[reg]);
+        mmr1_track(cpu, reg, -2); // the pointer is always a word
         break;
     case 6: { // X(Rn) — index  (PC: relative)
         uint16_t base = fetch(cpu);
@@ -659,6 +685,8 @@ static uint16_t io_read(pdp11_cpu *cpu, uint16_t a) {
     case IOPAGE_PSW:  return cpu->psw;
     case IOPAGE_PIRQ: return cpu->pirq;
     case 0177572u:    return cpu->mmr0; // MMR0
+    case 0177574u:    return cpu->mmr1; // MMR1 (read-only)
+    case 0177576u:    return cpu->mmr2; // MMR2 (read-only)
     case 0172516u:    return cpu->mmr3; // MMR3
     case KW11L_LKS:   return pdp11_clk_read(cpu); // KW11-L line clock
     case DL11_RCSR: case DL11_RBUF:
@@ -2108,6 +2136,14 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
     }
     cpu->abort_depth = 0;
     cpu->cc_frozen = false; // fresh for this instruction
+
+    // KB11-C MMU status snapshot: unless MMR0 is frozen (holding a prior fault),
+    // clear MMR1's register-delta log and latch this instruction's address into
+    // MMR2. PC here is the instruction's own address, before the fetch advances it.
+    if (cpu->has_mmu && !(cpu->mmr0 & 0160000u)) { // MMR0_FREEZE
+        cpu->mmr1 = 0;
+        cpu->mmr2 = cpu->r[PDP11_PC];
+    }
 
     uint16_t word = fetch(cpu);
     uint8_t top = (uint8_t)((word >> 12) & 017u);
