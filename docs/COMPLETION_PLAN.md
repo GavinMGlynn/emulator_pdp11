@@ -396,7 +396,22 @@ through idle WAIT by jumping to the next scheduled event of any subsystem. Boot
 stream byte-identical to SimH; long-run state hash deterministic.
 
 ## P10 — Broaden to the full model range
-- [ ] Subset CPU options / MMU / bus off the 11/70 superset for each model:
-      11/20, 11/03, 11/04, 11/05, 11/23(+), 11/24, 11/34, 11/40, 11/44, 11/53,
-      11/60, 11/73(B), 11/83, 11/84, 11/93, 11/94.
+- [x] **P10a** Model descriptor + optional-instruction gating. `pdp11_model` enum
+      and `pdp11_model_info` table for all 20 models (11/03…11/94), transcribed
+      from SimH `cpu_tab` (pdp11_cpumod.c) — the architectural oracle for which
+      options each model carries (feature present iff in the model's standard
+      `SOP_*` set). `pdp11_cpu_create_model()`; `pdp11_cpu_create()` stays the
+      full 11/70 so every golden, unit test, and the V6 boot is unchanged (boot
+      hash still `e9389aa0b4b3da86`). Enforced + tested this slice: **EIS**
+      (MUL/DIV/ASH/ASHC) and **FP11** trap through vector 10 on models without
+      them (matches SimH `if (!CPUO(OPT_EIS)) setTRAP(TRAP_ILL)`); per-model
+      **memory ceiling** (64 KiB / 256 KiB / 4 MiB by address width). **[A]**
+- [ ] **P10b** Base-instruction-set subsetting for the earliest machines: SOB,
+      SXT, XOR, MARK, RTT, SPL, ASH (non-EIS) absent on 11/20 / 11/05 / 11/04 /
+      11/03 (SimH gates these by `CPUT_20`/`CPUT_05`). MFPT per model.
+- [ ] **P10c** MMU presence: on a no-MMU model (11/20/05/04/03) MMR0-2, PAR/PDR,
+      and the mode/regset PSW bits do not exist — accesses are NXM, PSW writes
+      mask to `psw_mask`. 16/18/22-bit relocation width per model; Unibus map only
+      where `has_ubm`.
+- [ ] **P10d** Remaining per-model detail + Q-bus vs Unibus device set.
 - *Verify:* per-model probes **[A]**; model-specific timing **[T]** where documented.

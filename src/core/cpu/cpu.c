@@ -28,7 +28,49 @@
 
 #define IOPAGE_PIRQ 0177772u // program interrupt request register
 
-pdp11_cpu *pdp11_cpu_create(void) {
+// Per-model capability table. Transcribed from SimH's cpu_tab (pdp11_cpumod.c):
+// a feature is present iff it is in the model's standard option set (SOP_*),
+// which cpu_set_model loads as the power-up cpu_opt. Memory ceilings: 64 KiB
+// (16-bit), 256 KiB (18-bit Unibus), 4 MiB (22-bit). Order matches pdp11_model.
+#define MEM_64K  0000200000u //  64 KiB (2**16)
+#define MEM_256K 0001000000u // 256 KiB (2**18)
+#define MEM_4M   0020000000u //   4 MiB (2**22)
+static const pdp11_model_info k_model_tab[PDP11_MODEL_COUNT] = {
+    //  name       eis    fpp    mmu    ubm    max_mem   psw_mask
+    { "11/03",  false, false, false, false, MEM_64K,  0000377u },
+    { "11/04",  false, false, false, false, MEM_64K,  0000377u },
+    { "11/05",  false, false, false, false, MEM_64K,  0000377u },
+    { "11/20",  false, false, false, false, MEM_64K,  0000377u },
+    { "11/23",  true,  true,  true,  false, MEM_4M,   0170777u },
+    { "11/23+", true,  true,  true,  false, MEM_4M,   0170777u },
+    { "11/24",  true,  true,  true,  true,  MEM_4M,   0170777u },
+    { "11/34",  true,  false, true,  false, MEM_256K, 0170377u },
+    { "11/40",  true,  false, true,  false, MEM_256K, 0170377u },
+    { "11/44",  true,  true,  true,  true,  MEM_4M,   0170777u },
+    { "11/45",  true,  true,  true,  false, MEM_256K, 0174377u },
+    { "11/53",  true,  true,  true,  false, MEM_4M,   0174777u },
+    { "11/60",  true,  true,  true,  false, MEM_256K, 0170377u },
+    { "11/70",  true,  true,  true,  true,  MEM_4M,   0174377u },
+    { "11/73",  true,  true,  true,  false, MEM_4M,   0174777u },
+    { "11/73B", true,  true,  true,  false, MEM_4M,   0174777u },
+    { "11/83",  true,  true,  true,  false, MEM_4M,   0174777u },
+    { "11/84",  true,  true,  true,  false, MEM_4M,   0174777u },
+    { "11/93",  true,  true,  true,  false, MEM_4M,   0174777u },
+    { "11/94",  true,  true,  true,  false, MEM_4M,   0174777u },
+};
+
+const pdp11_model_info *pdp11_model_lookup(pdp11_model model) {
+    if (model < 0 || model >= PDP11_MODEL_COUNT) {
+        return NULL;
+    }
+    return &k_model_tab[model];
+}
+
+pdp11_cpu *pdp11_cpu_create_model(pdp11_model model) {
+    const pdp11_model_info *info = pdp11_model_lookup(model);
+    if (info == NULL) {
+        return NULL;
+    }
     pdp11_cpu *cpu = calloc(1, sizeof *cpu);
     if (cpu == NULL) {
         return NULL;
@@ -38,13 +80,23 @@ pdp11_cpu *pdp11_cpu_create(void) {
         free(cpu);
         return NULL;
     }
+    cpu->model = model;
+    cpu->has_eis = info->has_eis;
+    cpu->has_fpp = info->has_fpp;
+    cpu->has_mmu = info->has_mmu;
+    cpu->has_ubm = info->has_ubm;
     pdp11_cpu_reset(cpu);
-    // Installed memory: 256 KB (= 2**18), matching the oracle default
-    // `set cpu 256k`. A relocated physical reference at or above this and below
-    // the I/O page is non-existent memory and aborts through vector 4. It is a
-    // create-time configuration, so reset (runtime state only) leaves it alone.
-    cpu->mem_top = 01000000u;
+    // Installed memory: 256 KiB by default (matching the oracle's `set cpu 256k`,
+    // the V6 boot config), capped at the model's physical ceiling — so an 11/20
+    // sees its true 64 KiB. A relocated physical reference at or above mem_top and
+    // below the I/O page is non-existent memory and aborts through vector 4.
+    // Create-time configuration, so reset (runtime state only) leaves it alone.
+    cpu->mem_top = info->max_mem < 01000000u ? info->max_mem : 01000000u;
     return cpu;
+}
+
+pdp11_cpu *pdp11_cpu_create(void) {
+    return pdp11_cpu_create_model(PDP11_MODEL_1170);
 }
 
 void pdp11_cpu_destroy(pdp11_cpu *cpu) {
@@ -1374,13 +1426,13 @@ static void decode_misc(pdp11_cpu *cpu, uint16_t word) {
     } else if ((word & 0177000u) == 0004000) {
         op_jsr(cpu, word);
     } else if ((word & 0177000u) == 0070000) {
-        op_mul(cpu, word);
+        if (cpu->has_eis) { op_mul(cpu, word); } else { do_trap(cpu, VEC_RESERVED); }
     } else if ((word & 0177000u) == 0071000) {
-        op_div(cpu, word);
+        if (cpu->has_eis) { op_div(cpu, word); } else { do_trap(cpu, VEC_RESERVED); }
     } else if ((word & 0177000u) == 0072000) {
-        op_ash(cpu, word);
+        if (cpu->has_eis) { op_ash(cpu, word); } else { do_trap(cpu, VEC_RESERVED); }
     } else if ((word & 0177000u) == 0073000) {
-        op_ashc(cpu, word);
+        if (cpu->has_eis) { op_ashc(cpu, word); } else { do_trap(cpu, VEC_RESERVED); }
     } else if ((word & 0177000u) == 0074000) {
         op_xor(cpu, word);
     } else if ((word & 0177000u) == 0077000) {
@@ -2023,8 +2075,12 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
     case 010: // branches / byte single-op / EMT / TRAP (P2)
         decode_misc(cpu, word);
         break;
-    case 017: // FP11-C floating point
-        op_fp11(cpu, word);
+    case 017: // FP11-C floating point (traps as reserved on a model without FPP)
+        if (cpu->has_fpp) {
+            op_fp11(cpu, word);
+        } else {
+            do_trap(cpu, VEC_RESERVED);
+        }
         break;
     default:
         break;

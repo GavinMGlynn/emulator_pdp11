@@ -30,7 +30,40 @@ enum { PDP11_R0, PDP11_R1, PDP11_R2, PDP11_R3,
 #define PDP11_PSW_N 0000010u // negative
 #define PDP11_PSW_T 0000020u // trace trap
 
+// Model range (P10). The 11/70 (KB11-C) is the full superset built first; every
+// other model subsets it. Order mirrors SimH's cpu_tab (pdp11_cpumod.c), the
+// architectural oracle for which options each model carries.
+typedef enum {
+    PDP11_MODEL_1103, PDP11_MODEL_1104, PDP11_MODEL_1105, PDP11_MODEL_1120,
+    PDP11_MODEL_1123, PDP11_MODEL_1123P, PDP11_MODEL_1124, PDP11_MODEL_1134,
+    PDP11_MODEL_1140, PDP11_MODEL_1144, PDP11_MODEL_1145, PDP11_MODEL_1153,
+    PDP11_MODEL_1160, PDP11_MODEL_1170, PDP11_MODEL_1173, PDP11_MODEL_1173B,
+    PDP11_MODEL_1183, PDP11_MODEL_1184, PDP11_MODEL_1193, PDP11_MODEL_1194,
+    PDP11_MODEL_COUNT
+} pdp11_model;
+
+// Per-model capability descriptor. A feature is present iff it is in the model's
+// *standard* option set (SimH SOP_*, which cpu_set_model loads as cpu_opt); the
+// SimH `.opt` field lists only user-toggleable extras, not the power-up state.
+typedef struct {
+    const char *name;   // canonical model name ("11/70")
+    bool has_eis;       // MUL/DIV/ASH/ASHC (KE11-E / integral EIS)
+    bool has_fpp;       // FP11 floating-point processor
+    bool has_mmu;       // KT11 memory management
+    bool has_ubm;       // 18-bit Unibus map (22-bit Unibus models)
+    uint32_t max_mem;   // physical memory ceiling in bytes (64 KiB / 256 KiB / 4 MiB)
+    uint16_t psw_mask;  // writable PSW bits (narrower on modeless low-end machines)
+} pdp11_model_info;
+
+// The descriptor for a model (never NULL for a valid enum value).
+const pdp11_model_info *pdp11_model_lookup(pdp11_model model);
+
 typedef struct pdp11_cpu {
+    // Model identity + cached capability flags (create-time config, not runtime
+    // state — excluded from the state hash). Default create() is the 11/70.
+    pdp11_model model;
+    bool has_eis, has_fpp, has_mmu, has_ubm;
+
     uint16_t r[8]; // R0-R7 (kernel set; alternate set + modes land later)
     uint16_t psw;  // processor status word
     bool halted;   // set by HALT until the next reset
@@ -132,6 +165,10 @@ typedef struct pdp11_cpu {
 // Allocate a CPU with its own 4 MiB physical memory (heap — the memory array is
 // far too large for the stack). Returns NULL on allocation failure.
 pdp11_cpu *pdp11_cpu_create(void);
+// Allocate a CPU configured as a specific model (subsetting the 11/70 superset).
+// pdp11_cpu_create() is pdp11_cpu_create_model(PDP11_MODEL_1170). Returns NULL
+// on allocation failure or an out-of-range model.
+pdp11_cpu *pdp11_cpu_create_model(pdp11_model model);
 void pdp11_cpu_destroy(pdp11_cpu *cpu);
 
 // Clear registers, PSW, and the halted flag. Does not clear memory.

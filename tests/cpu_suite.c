@@ -1131,6 +1131,79 @@ static void test_the_state_hash_changes_when_a_single_memory_word_differs(void) 
     TEST_ASSERT_NOT_EQUAL_UINT64(base, perturbed);
 }
 
+// --- P10: model range — subsetting the 11/70 superset -----------------------
+
+static void test_the_default_cpu_is_a_full_option_11_70(void) {
+    // pdp11_cpu_create() must remain the KB11-C 11/70 with every option, so all
+    // existing tests, goldens, and the V6 boot are unaffected by the model work.
+    TEST_ASSERT_EQUAL_INT(PDP11_MODEL_1170, cpu->model);
+    TEST_ASSERT_TRUE(cpu->has_eis);
+    TEST_ASSERT_TRUE(cpu->has_fpp);
+    TEST_ASSERT_TRUE(cpu->has_mmu);
+    TEST_ASSERT_TRUE(cpu->has_ubm);
+    TEST_ASSERT_EQUAL_HEX32(01000000u, cpu->mem_top); // 256 KiB installed default
+}
+
+// Run one instruction on a fresh model-configured CPU and report the PC it left,
+// with vector 10 (reserved/illegal) pointing at a recognisable handler address.
+static uint16_t step_one_on_model(pdp11_model m, uint16_t opcode) {
+    pdp11_cpu *c = pdp11_cpu_create_model(m);
+    TEST_ASSERT_NOT_NULL(c);
+    c->r[PDP11_SP] = 0002000u;
+    c->r[PDP11_PC] = 001000u;
+    pdp11_mem_write_word(c->mem, 0010u, 0001600u); // reserved vector -> handler
+    pdp11_mem_write_word(c->mem, 0012u, 0u);
+    pdp11_mem_write_word(c->mem, 001000u, opcode);
+    pdp11_cpu_step(c);
+    uint16_t pc = c->r[PDP11_PC];
+    pdp11_cpu_destroy(c);
+    return pc;
+}
+
+static void test_an_11_20_traps_eis_instructions_as_reserved(void) {
+    // The 11/20 has no EIS: MUL/DIV/ASH/ASHC each trap through vector 10, matching
+    // SimH's `if (!CPUO(OPT_EIS)) setTRAP(TRAP_ILL)` for a non-EIS model.
+    TEST_ASSERT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1120, 0070001u)); // MUL
+    TEST_ASSERT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1120, 0071001u)); // DIV
+    TEST_ASSERT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1120, 0072001u)); // ASH
+    TEST_ASSERT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1120, 0073001u)); // ASHC
+}
+
+static void test_an_11_70_executes_eis_rather_than_trapping(void) {
+    // The same MUL opcode on the full 11/70 runs (does not vector to 10).
+    TEST_ASSERT_NOT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1170, 0070001u));
+}
+
+static void test_a_model_without_fpp_traps_fp11_instructions_as_reserved(void) {
+    // The 11/20 (no FP) and the 11/34 (FP11-A optional, off by default) both trap
+    // an FP11 opcode through vector 10; the 11/70 (FP11-C) executes it. SETF
+    // (0170001) is a control-class FP instruction.
+    TEST_ASSERT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1120, 0170001u));
+    TEST_ASSERT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1134, 0170001u));
+    TEST_ASSERT_NOT_EQUAL_HEX16(0001600u, step_one_on_model(PDP11_MODEL_1170, 0170001u));
+}
+
+static void test_the_11_34_has_eis_but_no_fpp(void) {
+    // A mid-range subset: EIS present, FP11 absent by default (matches SimH's
+    // SOP_1134 = EIS|MMU, FPP only in the toggleable option set).
+    const pdp11_model_info *i = pdp11_model_lookup(PDP11_MODEL_1134);
+    TEST_ASSERT_NOT_NULL(i);
+    TEST_ASSERT_TRUE(i->has_eis);
+    TEST_ASSERT_FALSE(i->has_fpp);
+    TEST_ASSERT_TRUE(i->has_mmu);
+}
+
+static void test_model_memory_ceilings_follow_the_address_width(void) {
+    // 16-bit (11/20) caps at 64 KiB; 18/22-bit models get the 256 KiB installed
+    // default. The ceiling is the model max; installed memory is min(default,max).
+    pdp11_cpu *c20 = pdp11_cpu_create_model(PDP11_MODEL_1120);
+    TEST_ASSERT_NOT_NULL(c20);
+    TEST_ASSERT_EQUAL_HEX32(0000200000u, c20->mem_top); // 64 KiB
+    pdp11_cpu_destroy(c20);
+    TEST_ASSERT_EQUAL_HEX32(0000200000u, pdp11_model_lookup(PDP11_MODEL_1120)->max_mem);
+    TEST_ASSERT_EQUAL_HEX32(0020000000u, pdp11_model_lookup(PDP11_MODEL_1170)->max_mem); // 4 MiB
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -1213,5 +1286,11 @@ int main(void) {
     RUN_TEST(test_a_wait_idle_skips_straight_to_the_next_clock_tick);
     RUN_TEST(test_a_wait_idle_skips_to_a_disk_completion_before_the_clock);
     RUN_TEST(test_the_state_hash_changes_when_a_single_memory_word_differs);
+    RUN_TEST(test_the_default_cpu_is_a_full_option_11_70);
+    RUN_TEST(test_an_11_20_traps_eis_instructions_as_reserved);
+    RUN_TEST(test_an_11_70_executes_eis_rather_than_trapping);
+    RUN_TEST(test_a_model_without_fpp_traps_fp11_instructions_as_reserved);
+    RUN_TEST(test_the_11_34_has_eis_but_no_fpp);
+    RUN_TEST(test_model_memory_ceilings_follow_the_address_width);
     return UNITY_END();
 }
