@@ -422,8 +422,17 @@ stream byte-identical to SimH; long-run state hash deterministic.
       unwritable on all models. The 11/70 mask (0174377) covers every meaningful
       bit, so the boot/goldens are unchanged (hash still `e9389aa0b4b3da86`).
       Per-model unit tests. **[A]**
-- [ ] **P10d** MMU-register presence: on a no-MMU model (11/20/05/04/03) MMR0-2
-      and PAR/PDR do not respond (NXM). 16/18/22-bit relocation width and the
-      MMR0/3/PAR/PDR bit-masks per model; Unibus map only where `has_ubm`.
+- [x] **P10d** MMU-register bit-masks per model. Added `mmr0_mask`/`mmr3_mask`/
+      `par_mask`/`pdr_mask` to the model table (SimH `cpu_tab` mm0/mm3/par/pdr) and
+      applied them on writes to MMR0 (0177572), MMR3 (0172516) and PAR/PDR. A mask
+      of 0 means the register is absent: MMR3 on the 11/34/40/60 and every no-MMU
+      machine reads back 0; PAR narrows to 12 bits on the 18-bit models; on a
+      no-MMU model all four registers read 0. The 11/70 masks affect only unused
+      bits, so the boot/goldens are unchanged (hash `e9389aa0b4b3da86`). Per-model
+      unit tests. **[A]** *Tail:* full I/O-page NXM-on-access to a truly absent
+      register (rather than reading 0) rides with the Unibus NXM work.
+- [ ] **P10e** Remaining per-model detail: Unibus map only where `has_ubm`; Q-bus
+      vs Unibus device set; MMR1/MMR2 where present; any residual PSW EXPT/T-bit
+      quirks (11/04/05/20). Close out the model range.
 - [ ] **P10d** Remaining per-model detail + Q-bus vs Unibus device set.
 - *Verify:* per-model probes **[A]**; model-specific timing **[T]** where documented.

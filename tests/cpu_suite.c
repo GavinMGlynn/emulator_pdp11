@@ -1283,6 +1283,44 @@ static void test_the_psw_mode_and_regset_bits_are_unwritable_on_a_modeless_machi
     TEST_ASSERT_EQUAL_HEX16(0004000u, psw_after_write_on_model(PDP11_MODEL_1170, 0007400u));
 }
 
+// Write `value` to an I/O-page register the hardware way (MOV #value,@#addr) on
+// a fresh model CPU and report what a read of that register returns.
+static uint16_t io_reg_roundtrip_on_model(pdp11_model m, uint16_t addr, uint16_t value) {
+    pdp11_cpu *c = pdp11_cpu_create_model(m);
+    TEST_ASSERT_NOT_NULL(c);
+    c->r[PDP11_PC] = 001000u;
+    pdp11_mem_write_word(c->mem, 001000u, 0012737u); // MOV #value, @#addr
+    pdp11_mem_write_word(c->mem, 001002u, value);
+    pdp11_mem_write_word(c->mem, 001004u, addr);
+    pdp11_cpu_step(c);
+    // Read the register back the same way: MOV @#addr, R0.
+    c->r[PDP11_PC] = 002000u;
+    pdp11_mem_write_word(c->mem, 002000u, 0013700u); // MOV @#addr, R0
+    pdp11_mem_write_word(c->mem, 002002u, addr);
+    pdp11_cpu_step(c);
+    uint16_t got = c->r[PDP11_R0];
+    pdp11_cpu_destroy(c);
+    return got;
+}
+
+static void test_mmr3_does_not_exist_on_models_that_predate_it(void) {
+    // MMR3 (0172516) is present on the F-class, 11/44, 45, 70 and J-class; on the
+    // 11/34/40/60 and the no-MMU machines its mask is 0 — writes are dropped and
+    // it reads back 0. The 11/70 holds the bits V6 uses (mask 0000067).
+    TEST_ASSERT_EQUAL_HEX16(0u, io_reg_roundtrip_on_model(PDP11_MODEL_1134, 0172516u, 0177777u));
+    TEST_ASSERT_EQUAL_HEX16(0u, io_reg_roundtrip_on_model(PDP11_MODEL_1120, 0172516u, 0177777u));
+    TEST_ASSERT_EQUAL_HEX16(0000067u, io_reg_roundtrip_on_model(PDP11_MODEL_1170, 0172516u, 0177777u));
+    TEST_ASSERT_EQUAL_HEX16(0000077u, io_reg_roundtrip_on_model(PDP11_MODEL_1144, 0172516u, 0177777u));
+}
+
+static void test_par_width_narrows_on_the_18bit_models(void) {
+    // Kernel PAR 0 is at 0172340. The 11/70 keeps a full 16-bit PAR; the 11/34
+    // (18-bit, mask 0007777) holds only 12 bits; a no-MMU model holds nothing.
+    TEST_ASSERT_EQUAL_HEX16(0177777u, io_reg_roundtrip_on_model(PDP11_MODEL_1170, 0172340u, 0177777u));
+    TEST_ASSERT_EQUAL_HEX16(0007777u, io_reg_roundtrip_on_model(PDP11_MODEL_1134, 0172340u, 0177777u));
+    TEST_ASSERT_EQUAL_HEX16(0u, io_reg_roundtrip_on_model(PDP11_MODEL_1120, 0172340u, 0177777u));
+}
+
 static void test_model_psw_masks_match_the_reference_table(void) {
     TEST_ASSERT_EQUAL_HEX16(0000377u, pdp11_model_lookup(PDP11_MODEL_1120)->psw_mask);
     TEST_ASSERT_EQUAL_HEX16(0170377u, pdp11_model_lookup(PDP11_MODEL_1134)->psw_mask);
@@ -1384,5 +1422,7 @@ int main(void) {
     RUN_TEST(test_model_memory_ceilings_follow_the_address_width);
     RUN_TEST(test_the_psw_mode_and_regset_bits_are_unwritable_on_a_modeless_machine);
     RUN_TEST(test_model_psw_masks_match_the_reference_table);
+    RUN_TEST(test_mmr3_does_not_exist_on_models_that_predate_it);
+    RUN_TEST(test_par_width_narrows_on_the_18bit_models);
     return UNITY_END();
 }

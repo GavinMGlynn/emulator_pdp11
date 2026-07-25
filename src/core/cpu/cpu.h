@@ -60,6 +60,10 @@ typedef struct {
     uint16_t mfpt_code; // MFPT type code returned in R0, or 0 if MFPT is absent
     uint32_t max_mem;   // physical memory ceiling in bytes (64 KiB / 256 KiB / 4 MiB)
     uint16_t psw_mask;  // writable PSW bits (narrower on modeless low-end machines)
+    // KT11 register bit-masks (SimH cpu_tab mm0/mm3/par/pdr). A mask of 0 means
+    // the register does not exist on this model (no-MMU machines, and MMR3 on the
+    // models that predate it): writes are dropped, reads return 0.
+    uint16_t mmr0_mask, mmr3_mask, par_mask, pdr_mask;
 } pdp11_model_info;
 
 // The descriptor for a model (never NULL for a valid enum value).
@@ -73,6 +77,7 @@ typedef struct pdp11_cpu {
     bool has_sxs, has_mark, has_rtt, has_spl;
     uint16_t mfpt_code;
     uint16_t psw_mask; // writable PSW bits for this model
+    uint16_t mmr0_mask, mmr3_mask, par_mask, pdr_mask; // KT11 register masks
 
     uint16_t r[8]; // R0-R7 (kernel set; alternate set + modes land later)
     uint16_t psw;  // processor status word

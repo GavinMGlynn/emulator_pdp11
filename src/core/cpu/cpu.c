@@ -36,27 +36,27 @@
 #define MEM_256K 0001000000u // 256 KiB (2**18)
 #define MEM_4M   0020000000u //   4 MiB (2**22)
 static const pdp11_model_info k_model_tab[PDP11_MODEL_COUNT] = {
-    //  name       eis    fpp    mmu    ubm    sxs    mark   rtt    spl   mfpt max_mem   psw_mask
-    { "11/03",  false, false, false, false, true,  true,  true,  false, 0, MEM_64K,  0000377u },
-    { "11/04",  false, false, false, false, false, false, true,  false, 0, MEM_64K,  0000377u },
-    { "11/05",  false, false, false, false, false, false, false, false, 0, MEM_64K,  0000377u },
-    { "11/20",  false, false, false, false, false, false, false, false, 0, MEM_64K,  0000377u },
-    { "11/23",  true,  true,  true,  false, true,  true,  true,  false, 3, MEM_4M,   0170777u },
-    { "11/23+", true,  true,  true,  false, true,  true,  true,  false, 3, MEM_4M,   0170777u },
-    { "11/24",  true,  true,  true,  true,  true,  true,  true,  false, 3, MEM_4M,   0170777u },
-    { "11/34",  true,  false, true,  false, true,  true,  true,  false, 0, MEM_256K, 0170377u },
-    { "11/40",  true,  false, true,  false, true,  true,  true,  false, 0, MEM_256K, 0170377u },
-    { "11/44",  true,  true,  true,  true,  true,  true,  true,  true,  1, MEM_4M,   0170777u },
-    { "11/45",  true,  true,  true,  false, true,  true,  true,  true,  0, MEM_256K, 0174377u },
-    { "11/53",  true,  true,  true,  false, true,  true,  true,  true,  5, MEM_4M,   0174777u },
-    { "11/60",  true,  true,  true,  false, true,  true,  true,  false, 0, MEM_256K, 0170377u },
-    { "11/70",  true,  true,  true,  true,  true,  true,  true,  true,  0, MEM_4M,   0174377u },
-    { "11/73",  true,  true,  true,  false, true,  true,  true,  true,  5, MEM_4M,   0174777u },
-    { "11/73B", true,  true,  true,  false, true,  true,  true,  true,  5, MEM_4M,   0174777u },
-    { "11/83",  true,  true,  true,  false, true,  true,  true,  true,  5, MEM_4M,   0174777u },
-    { "11/84",  true,  true,  true,  false, true,  true,  true,  true,  5, MEM_4M,   0174777u },
-    { "11/93",  true,  true,  true,  false, true,  true,  true,  true,  5, MEM_4M,   0174777u },
-    { "11/94",  true,  true,  true,  false, true,  true,  true,  true,  5, MEM_4M,   0174777u },
+    //  name       eis    fpp    mmu    ubm    sxs    mark   rtt    spl   mfpt max_mem   psw_mask  mmr0     mmr3     par      pdr
+    { "11/03",  false, false, false, false, true,  true,  true,  false, 0, MEM_64K,  0000377u, 0,        0,        0,        0        },
+    { "11/04",  false, false, false, false, false, false, true,  false, 0, MEM_64K,  0000377u, 0,        0,        0,        0        },
+    { "11/05",  false, false, false, false, false, false, false, false, 0, MEM_64K,  0000377u, 0,        0,        0,        0        },
+    { "11/20",  false, false, false, false, false, false, false, false, 0, MEM_64K,  0000377u, 0,        0,        0,        0        },
+    { "11/23",  true,  true,  true,  false, true,  true,  true,  false, 3, MEM_4M,   0170777u, 0160157u, 0000060u, 0177777u, 0077516u },
+    { "11/23+", true,  true,  true,  false, true,  true,  true,  false, 3, MEM_4M,   0170777u, 0160157u, 0000060u, 0177777u, 0077516u },
+    { "11/24",  true,  true,  true,  true,  true,  true,  true,  false, 3, MEM_4M,   0170777u, 0160157u, 0000060u, 0177777u, 0077516u },
+    { "11/34",  true,  false, true,  false, true,  true,  true,  false, 0, MEM_256K, 0170377u, 0160557u, 0,        0007777u, 0077516u },
+    { "11/40",  true,  false, true,  false, true,  true,  true,  false, 0, MEM_256K, 0170377u, 0160557u, 0,        0007777u, 0077516u },
+    { "11/44",  true,  true,  true,  true,  true,  true,  true,  true,  1, MEM_4M,   0170777u, 0160557u, 0000077u, 0177777u, 0177516u },
+    { "11/45",  true,  true,  true,  false, true,  true,  true,  true,  0, MEM_256K, 0174377u, 0171777u, 0000007u, 0007777u, 0077717u },
+    { "11/53",  true,  true,  true,  false, true,  true,  true,  true,  5, MEM_4M,   0174777u, 0160177u, 0000077u, 0177777u, 0177516u },
+    { "11/60",  true,  true,  true,  false, true,  true,  true,  false, 0, MEM_256K, 0170377u, 0160557u, 0,        0007777u, 0077516u },
+    { "11/70",  true,  true,  true,  true,  true,  true,  true,  true,  0, MEM_4M,   0174377u, 0171777u, 0000067u, 0177777u, 0077717u },
+    { "11/73",  true,  true,  true,  false, true,  true,  true,  true,  5, MEM_4M,   0174777u, 0160177u, 0000077u, 0177777u, 0177516u },
+    { "11/73B", true,  true,  true,  false, true,  true,  true,  true,  5, MEM_4M,   0174777u, 0160177u, 0000077u, 0177777u, 0177516u },
+    { "11/83",  true,  true,  true,  false, true,  true,  true,  true,  5, MEM_4M,   0174777u, 0160177u, 0000077u, 0177777u, 0177516u },
+    { "11/84",  true,  true,  true,  false, true,  true,  true,  true,  5, MEM_4M,   0174777u, 0160177u, 0000077u, 0177777u, 0177516u },
+    { "11/93",  true,  true,  true,  false, true,  true,  true,  true,  5, MEM_4M,   0174777u, 0160177u, 0000077u, 0177777u, 0177516u },
+    { "11/94",  true,  true,  true,  false, true,  true,  true,  true,  5, MEM_4M,   0174777u, 0160177u, 0000077u, 0177777u, 0177516u },
 };
 
 const pdp11_model_info *pdp11_model_lookup(pdp11_model model) {
@@ -91,6 +91,10 @@ pdp11_cpu *pdp11_cpu_create_model(pdp11_model model) {
     cpu->has_spl = info->has_spl;
     cpu->mfpt_code = info->mfpt_code;
     cpu->psw_mask = info->psw_mask;
+    cpu->mmr0_mask = info->mmr0_mask;
+    cpu->mmr3_mask = info->mmr3_mask;
+    cpu->par_mask = info->par_mask;
+    cpu->pdr_mask = info->pdr_mask;
     pdp11_cpu_reset(cpu);
     // Installed memory: 256 KiB by default (matching the oracle's `set cpu 256k`,
     // the V6 boot config), capped at the model's physical ceiling — so an 11/20
@@ -684,8 +688,8 @@ static void io_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
     switch (a) {
     case IOPAGE_PSW:  put_psw(cpu, value); cpu->cc_frozen = true; return;
     case IOPAGE_PIRQ: put_pirq(cpu, value); return;
-    case 0177572u:    cpu->mmr0 = value; return;
-    case 0172516u:    cpu->mmr3 = value; return;
+    case 0177572u:    cpu->mmr0 = (uint16_t)(value & cpu->mmr0_mask); return;
+    case 0172516u:    cpu->mmr3 = (uint16_t)(value & cpu->mmr3_mask); return;
     case KW11L_LKS:   pdp11_clk_write(cpu, value); return; // KW11-L line clock
     case DL11_RCSR: case DL11_RBUF:
     case DL11_XCSR: case DL11_XBUF:
@@ -705,9 +709,9 @@ static void io_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
     idx = apr_index(a, &is_par);
     if (idx >= 0) {
         if (is_par) {
-            cpu->par[idx] = value;
+            cpu->par[idx] = (uint16_t)(value & cpu->par_mask);
         } else {
-            cpu->pdr[idx] = value;
+            cpu->pdr[idx] = (uint16_t)(value & cpu->pdr_mask);
         }
     }
     // else: unmapped — dropped for now (NXM trap with the Unibus at P6).
