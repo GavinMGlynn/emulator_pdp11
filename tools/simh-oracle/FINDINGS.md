@@ -302,6 +302,30 @@ why it re-blocks; compare the tty `t_rawq`/`t_canq`/`t_flags` state vs SimH.
 (Reminder: this is deep chase-the-PC territory; the boot-to-`login:` thermometer
 is met and all subsystem probes are byte-identical to SimH.)
 
+**Update (2026-07-25, sixth pass) — pinned to the tty `read()` not waking.**
+Extracted `/etc/getty` from the image (inode 93, a.out 0410, text 704 B) and
+disassembled it: getty's main loop `read(0, buf, 1)` **one char at a time** (via
+the `TRAP 0` syscall stub at 001030), strips parity (`BIC #177600`), **echoes**
+each char (`write(1, buf, 1)` at 000470), and maps case — exactly matching SimH,
+which echoes "root". So getty *should* echo+consume each char. Traced getty in
+our run: its `read` syscall enters the kernel (`TRAP` → 000746) and **sleeps in
+`ttread` (kernel 021214-021432, the swtch/sleep region) and never returns** — it
+reaches *none* of the post-syscall PCs (001056/001062/001240/000432/000470 = 0
+hits). Meanwhile the char we type is read by the RX ISR (RBUF read confirmed) and
+`ttyinput` runs, yet getty (proc[2]) stays **SWAIT** — so **`ttyinput` does not
+wake getty's blocked `read`**, and getty never echoes or advances to exec.
+
+So the bug is squarely the **RX char failing to wake the sleeping tty read**.
+Most likely: the console tty is in canonical mode waiting for a line terminator
+and our `ttyinput` doesn't recognise/​map the CR (no `\n`, so no
+`wakeup(&t_rawq)`), OR a subtle CPU-branch bug in the short `ttyinput` path takes
+the wrong branch. *Next (focused):* gated-trace our `ttyinput`/RX-ISR path for one
+typed char vs the same in SimH (both start at the RBUF read) — a short window, so
+clock jitter is bounded — and find where a branch diverges or the `wakeup` is
+skipped; and read the console tty's `t_flags` (CRMOD/ECHO/canon) in both. This is
+the tightest the divergence has been localised. (Boot-to-`login:` thermometer
+remains met; all subsystem probes byte-identical to SimH.)
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|
