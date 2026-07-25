@@ -1321,6 +1321,26 @@ static void test_par_width_narrows_on_the_18bit_models(void) {
     TEST_ASSERT_EQUAL_HEX16(0u, io_reg_roundtrip_on_model(PDP11_MODEL_1120, 0172340u, 0177777u));
 }
 
+static void test_the_unibus_map_is_absent_on_a_model_without_it(void) {
+    // Only the 11/24, 11/44 and 11/70 carry the 18-bit Unibus map. On the 11/45
+    // its registers do not respond and a DMA address is never relocated, even
+    // with MMR3<BME> and a non-identity map entry forced directly.
+    TEST_ASSERT_EQUAL_HEX16(0u, io_reg_roundtrip_on_model(PDP11_MODEL_1145, 0170200u, 0177777u));
+    pdp11_cpu *c45 = pdp11_cpu_create_model(PDP11_MODEL_1145);
+    TEST_ASSERT_NOT_NULL(c45);
+    c45->mmr3 = 0000040u;      // MMR3<BME> set directly
+    c45->ub_map[1] = 0740000u; // would relocate page 1 on a UBM machine
+    TEST_ASSERT_EQUAL_HEX32(0020000u, pdp11_unibus_map(c45, 0020000u)); // identity
+    pdp11_cpu_destroy(c45);
+    // The 11/70 relocates the same setup through the map.
+    pdp11_cpu *c70 = pdp11_cpu_create_model(PDP11_MODEL_1170);
+    TEST_ASSERT_NOT_NULL(c70);
+    c70->mmr3 = 0000040u;
+    c70->ub_map[1] = 0740000u;
+    TEST_ASSERT_EQUAL_HEX32(0740000u, pdp11_unibus_map(c70, 0020000u));
+    pdp11_cpu_destroy(c70);
+}
+
 static void test_model_psw_masks_match_the_reference_table(void) {
     TEST_ASSERT_EQUAL_HEX16(0000377u, pdp11_model_lookup(PDP11_MODEL_1120)->psw_mask);
     TEST_ASSERT_EQUAL_HEX16(0170377u, pdp11_model_lookup(PDP11_MODEL_1134)->psw_mask);
@@ -1424,5 +1444,6 @@ int main(void) {
     RUN_TEST(test_model_psw_masks_match_the_reference_table);
     RUN_TEST(test_mmr3_does_not_exist_on_models_that_predate_it);
     RUN_TEST(test_par_width_narrows_on_the_18bit_models);
+    RUN_TEST(test_the_unibus_map_is_absent_on_a_model_without_it);
     return UNITY_END();
 }

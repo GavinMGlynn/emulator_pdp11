@@ -431,8 +431,22 @@ stream byte-identical to SimH; long-run state hash deterministic.
       bits, so the boot/goldens are unchanged (hash `e9389aa0b4b3da86`). Per-model
       unit tests. **[A]** *Tail:* full I/O-page NXM-on-access to a truly absent
       register (rather than reading 0) rides with the Unibus NXM work.
-- [ ] **P10e** Remaining per-model detail: Unibus map only where `has_ubm`; Q-bus
-      vs Unibus device set; MMR1/MMR2 where present; any residual PSW EXPT/T-bit
-      quirks (11/04/05/20). Close out the model range.
+- [x] **P10e** Unibus map gated to UBM models. `pdp11_unibus_map` relocates, and
+      the UBM registers (0170200-0170377) respond, only when `has_ubm` — the
+      11/24, 11/44 and 11/70. On any other model a DMA address is returned
+      identity even with MMR3<BME> forced, and the register block reads 0. Unit
+      test; 11/70 boot unchanged (hash `e9389aa0b4b3da86`). **[A]**
+- *Remaining P10 tails* (documented, low boot-relevance): Q-bus vs Unibus device
+      set per model; MMR1/MMR2 modelling where present; the 11/04/05/20 EXPT
+      (explicit-PSW-alters-T) and JMP/JSR `(R)+` quirks. The model-selection
+      superset→subset framework and every option the current core models (EIS,
+      FP11, base set, SPL/MFPT, PSW, MMU registers, Unibus map, memory ceiling)
+      are subset per model and verified against SimH's `cpu_tab`.
+
+**P10 — core model range COMPLETE.** All 20 models (11/03…11/94) are described by
+`pdp11_model_info` (transcribed from SimH `cpu_tab`) and every capability the
+core implements is subset per model and unit-tested; the 11/70 remains the full
+superset with its boot byte-identical to SimH. Residual per-model device/quirk
+detail is tracked as tails above.
 - [ ] **P10d** Remaining per-model detail + Q-bus vs Unibus device set.
 - *Verify:* per-model probes **[A]**; model-specific timing **[T]** where documented.

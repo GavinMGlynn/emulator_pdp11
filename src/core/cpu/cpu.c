@@ -581,8 +581,9 @@ static bool is_iopage(uint32_t pa) { return pa >= IOPAGE_TOP; }
 // page adds the mapping register's 22-bit base to the 13-bit offset. With the
 // map disabled the 18-bit address is already the physical address.
 uint32_t pdp11_unibus_map(const pdp11_cpu *cpu, uint32_t uba) {
-    if (!(cpu->mmr3 & MMR3_BME)) {
-        return uba & 0777777u; // 18-bit direct (no relocation)
+    if (!cpu->has_ubm || !(cpu->mmr3 & MMR3_BME)) {
+        return uba & 0777777u; // 18-bit direct (no relocation): only the 11/24,
+                               // 11/44 and 11/70 carry the Unibus map at all
     }
     uint32_t pg = (uba >> 13) & 037u;   // one of 32 8 KB pages
     uint32_t off = uba & 017777u;       // offset within the page
@@ -647,7 +648,7 @@ static void ubm_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
 static uint16_t io_read(pdp11_cpu *cpu, uint16_t a) {
     bool is_par;
     int idx;
-    if (a >= UBM_BASE && a <= UBM_END) {
+    if (cpu->has_ubm && a >= UBM_BASE && a <= UBM_END) {
         return ubm_read(cpu, a);
     }
     switch (a) {
@@ -681,7 +682,7 @@ static uint16_t io_read(pdp11_cpu *cpu, uint16_t a) {
 static void io_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
     bool is_par;
     int idx;
-    if (a >= UBM_BASE && a <= UBM_END) {
+    if (cpu->has_ubm && a >= UBM_BASE && a <= UBM_END) {
         ubm_write(cpu, a, value);
         return;
     }
