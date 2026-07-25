@@ -28,12 +28,14 @@
 typedef struct {
     char cell[TROWS][TCOLS];
     int cx, cy;
+    int erase_pending; // '#' erase chars sent to V6, not yet echoed back
 } vt_term;
 
 static void vt_init(vt_term *t) {
     memset(t->cell, ' ', sizeof t->cell);
     t->cx = 0;
     t->cy = 0;
+    t->erase_pending = 0;
 }
 
 static void vt_scroll(vt_term *t) {
@@ -50,6 +52,18 @@ static void vt_newline(vt_term *t) {
 }
 
 static void vt_putc(vt_term *t, char c) {
+    // V6 echoes its erase char ('#') literally when you rub out a character.
+    // Turn that echo into a proper destructive backspace on this CRT: erase the
+    // char to the left and back up. (Only for '#' we ourselves sent — a '#' a
+    // program prints is left alone.)
+    if (c == '#' && t->erase_pending > 0) {
+        t->erase_pending--;
+        if (t->cx > 0) {
+            t->cx--;
+            t->cell[t->cy][t->cx] = ' ';
+        }
+        return;
+    }
     switch (c) {
     case '\r': t->cx = 0; return;
     case '\n': vt_newline(t); return;
@@ -210,6 +224,19 @@ static void render(SDL_Renderer *r, const vt_term *t, const pdp11_cpu *cpu,
         draw_text(r, (float)MARGIN, (float)(MARGIN + row * GLYPH), line);
     }
 
+    // Block cursor at the current position (inverse video), so you can see where
+    // the next typed character will land.
+    if (t->cx >= 0 && t->cx < TCOLS && t->cy >= 0 && t->cy < TROWS) {
+        float cxp = (float)(MARGIN + t->cx * GLYPH);
+        float cyp = (float)(MARGIN + t->cy * GLYPH);
+        SDL_FRect cur = {cxp, cyp, (float)GLYPH, (float)GLYPH};
+        SDL_SetRenderDrawColor(r, 120, 255, 140, 255); // terminal green
+        SDL_RenderFillRect(r, &cur);
+        char under[2] = {t->cell[t->cy][t->cx], '\0'}; // char under it, in bg colour
+        SDL_SetRenderDrawColor(r, 12, 12, 16, 255);
+        draw_text(r, cxp, cyp, under);
+    }
+
     // Console panel below a divider line.
     SDL_SetRenderDrawColor(r, 40, 40, 48, 255);
     SDL_FRect div = {0.0f, PANEL_TOP - (float)MARGIN / 2.0f, (float)WIN_W, 1.0f};
@@ -328,7 +355,8 @@ static int key_to_byte(SDL_Keycode key) {
     switch (key) {
     case SDLK_RETURN:
     case SDLK_KP_ENTER:  return '\r';
-    case SDLK_BACKSPACE: return 0177; // DEL, the V6 erase char
+    case SDLK_BACKSPACE: return '#';   // V6's erase char (DEL 0177 is INTR, not erase)
+    case SDLK_DELETE:    return 0177;  // DEL = rubout = V6 interrupt
     case SDLK_TAB:       return '\t';
     case SDLK_ESCAPE:    return 033;
     default:             return -1;
@@ -413,21 +441,35 @@ int main(int argc, char **argv) {
     bool running = true;
     long frame = 0;
     uint64_t total = 0;
+    // Keyboard FIFO: typed bytes are queued and fed to the DL11 receiver one at a
+    // time as it becomes ready (DONE clears when the program reads RBUF). Without
+    // this, anything typed while the receiver is still full is dropped — which is
+    // what made typing feel clunky.
+    uint8_t kbd[256];
+    size_t kbd_head = 0, kbd_tail = 0;
+#define KBD_PUSH(byte) do { \
+        size_t n_ = (kbd_tail + 1) % sizeof kbd; \
+        if (n_ != kbd_head) { kbd[kbd_tail] = (uint8_t)(byte); kbd_tail = n_; } \
+    } while (0)
     while (running) {
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
             if (ev.type == SDL_EVENT_QUIT) {
                 running = false;
             } else if (ev.type == SDL_EVENT_KEY_DOWN) {
-                int b = key_to_byte(ev.key.key);
-                if (b >= 0 && !(cpu->tti_csr & DL11_DONE)) {
-                    pdp11_console_input(cpu, (uint8_t)b);
+                // Ctrl+letter -> control code (^A..^Z = 1..26; ^D = EOF, ^C, ...).
+                if ((ev.key.mod & SDL_KMOD_CTRL) && ev.key.key >= 'a'
+                    && ev.key.key <= 'z') {
+                    KBD_PUSH(ev.key.key - 'a' + 1);
+                } else {
+                    int b = key_to_byte(ev.key.key);
+                    if (b >= 0) {
+                        KBD_PUSH(b);
+                    }
                 }
             } else if (ev.type == SDL_EVENT_TEXT_INPUT) {
                 for (const char *p = ev.text.text; *p != '\0'; ++p) {
-                    if (!(cpu->tti_csr & DL11_DONE)) {
-                        pdp11_console_input(cpu, (uint8_t)*p);
-                    }
+                    KBD_PUSH(*p);
                 }
             } else if (ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
                 float lx = 0.0f, ly = 0.0f;
@@ -438,6 +480,16 @@ int main(int argc, char **argv) {
         }
 
         for (uint64_t k = 0; k < ips && !cpu->halted; ++k) {
+            // Hand the next queued keystroke to the DL11 the moment it is ready
+            // (the program has read the previous character), so type-ahead works.
+            if (kbd_head != kbd_tail && !(cpu->tti_csr & DL11_DONE)) {
+                uint8_t b = kbd[kbd_head];
+                if (b == '#') { // V6 will echo this erase — arm the interception
+                    term.erase_pending++;
+                }
+                pdp11_console_input(cpu, b);
+                kbd_head = (kbd_head + 1) % sizeof kbd;
+            }
             pdp11_cpu_step(cpu);
             ++total;
         }
