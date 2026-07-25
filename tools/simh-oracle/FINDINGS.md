@@ -326,6 +326,30 @@ skipped; and read the console tty's `t_flags` (CRMOD/ECHO/canon) in both. This i
 the tightest the divergence has been localised. (Boot-to-`login:` thermometer
 remains met; all subsystem probes byte-identical to SimH.)
 
+**Update (2026-07-25, seventh pass) — the RX char's `wakeup` finds no matching
+proc; getty's `p_wchan` differs.** Gated a per-instruction PC/SP/PSW trace in
+*both* emulators, anchored at the RBUF read of the login `r` (short window, so
+clock jitter is bounded). They run **identical for 74 instructions**, then
+diverge inside the kernel `wakeup` scan at **033140** (`CMP R3,22(R4)` over the
+proc table, `#62` entries, 22-byte stride): ours gets **Z=0** (no match → keeps
+scanning), SimH gets **Z=1** (match → wakes that proc and exits). Instrumented
+both to print the operands: the wake **channel R3 = 041362 is identical** in ours
+and SimH, and the scanned proc slots (R4 = 05206, 05234, …) are identical — but in
+**ours no proc has `p_wchan` = 041362** (values 005172/005234/0/0/004676/…),
+whereas SimH has one (getty). So `ttyinput`'s `wakeup(041362)` is correct and
+identical; the difference is that **getty is not sleeping on 041362 in ours** —
+its `p_wchan` (the channel it slept on inside the tty `read`) is different. That
+is exactly why the typed char never wakes getty's `read`, so it never echoes or
+execs.
+
+So the divergence has moved one step upstream, to **where getty's `read()` chose
+its sleep channel**. *Next:* identify getty's proc slot and its actual `p_wchan`
+in ours, then trace getty's `read`→`sleep` path (kernel, when it first blocks) and
+compare the channel argument vs SimH — that is where the true root cause lives.
+This is the tightest the bug has been bracketed. (Boot-to-`login:` thermometer
+remains met; every subsystem probe byte-identical to SimH; this is deep
+chase-the-PC territory in the V6 tty/sleep interaction.)
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|
