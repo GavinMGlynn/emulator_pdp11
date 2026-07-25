@@ -278,6 +278,30 @@ idle iteration (no double-tick). NOTE per CLAUDE.md this is deep "chase-the-PC"
 territory; the boot-to-`login:` thermometer is met and every subsystem probe is
 byte-identical to SimH, so this tail does not gate verified correctness.
 
+**Update (2026-07-25, fifth pass) — the update-daemon "thrash" was a red herring;
+narrowed to getty waking then immediately re-blocking.** Measured the emulated
+time between `update`'s block-7 writes: **exactly ~30.0 s apart** (`dt=29.97s`),
+so `sleep(30)` works perfectly — the repeated 2/7/8 writes are the *normal*
+periodic `sync()`, not a thrash. (At login the system is ~fully idle: 40M
+instructions = 1591 s = 26 min of emulated time, each WAIT jumping one 16.67 ms
+tick — so "133 syncs in 50M instr" is just 26 min of 30-s syncs.) Previous
+iterations over-read this; corrected.
+
+Refocused on the real symptom (getty never echoes/execs after `root\r`). Traced
+the RX-ISR path gated on reading the `\r` that ends "root": the ISR runs
+(`071130` → ttyinput at `066xxx`), and a **user-mode process does wake and run**
+(28 user instructions at PC 000426/001030-001054, PSW 170004) — so getty *is*
+woken and scheduled — but it runs only ~28 instructions, **blocks again**, and
+returns to swtch/idle without echoing or issuing the exec disk reads. So the bug
+is a subtle **process/syscall** issue: getty wakes on the line, runs briefly,
+then re-blocks instead of completing the read and exec-ing `/bin/login`. Prime
+suspects now: the tty canonical read returning short/EOF, or a `sleep`/`wakeup`
+channel mismatch so getty re-sleeps. *Next:* trace those 28 user instructions
+(000426/001030-001054 in the process image) to see which syscall getty issues and
+why it re-blocks; compare the tty `t_rawq`/`t_canq`/`t_flags` state vs SimH.
+(Reminder: this is deep chase-the-PC territory; the boot-to-`login:` thermometer
+is met and all subsystem probes are byte-identical to SimH.)
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|
