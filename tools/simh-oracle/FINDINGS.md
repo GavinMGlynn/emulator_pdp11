@@ -247,6 +247,37 @@ from there (gated SimH per-instruction fprintf enabled only after the 130th RK
 op, using the working boot script) to pin the first divergent instruction in the
 resume path.
 
+**Update (2026-07-25, fourth pass) — instruction-aligned the resume; the
+divergence is scheduling/clock-timing, not a discrete opcode bug.** Instrumented
+*both* emulators with a per-instruction PC/SP/PSW trace gated to start at the same
+landmark — the 131st RK op (the swap-in) — via a shared op counter (SimH:
+`rk_opc` in pdp11_rk.c → `rkop_trace_left` in pdp11_cpu.c; ours: an `rk` op count
+→ `g_swaptrace`). Both reverted after. Aligning the two 60 k-instruction windows
+on the shared `cret` epilogue: they run **identically for ~9 instructions**
+(022254-022270 then 072110, 021710), then diverge at **021710** — SimH takes an
+interrupt to **000304** (PSW→000240, priority 5, so a BR6 device = the clock),
+ours runs 021710 sequentially to 021712 and takes that interrupt a few
+instructions later. Ours hits 000304 **16×** vs SimH **19×** across the window —
+i.e. **clock-interrupt-timing jitter**, inherent to our cycle-accurate `time_ns`
+vs SimH's calibrated model, not a missing interrupt. The PC histograms over the
+window are otherwise similar, so there is **no discrete instruction bug** at the
+divergence — instruction-level alignment is simply defeated by the clock jitter.
+
+The real, jitter-tolerant signal remains the RK-op sequence: SimH's resumed
+process **exec's** (its op 131 = `rd 3`, reading `/bin/login`'s inode) while ours
+schedules the **update daemon**, which thrashes. So the bug is a **scheduling /
+timing interaction** — after the swap, ours runs `update` (sync-loop) instead of
+the exec-ing getty/login, and `update`'s `sleep(30)` evidently isn't blocking
+(133 syncs where SimH does a handful). Prime suspects: (1) the KW11-L tick *rate*
+or the WAIT-idle time advance skewing V6's per-second alarm decrement so
+`alarm(30)` fires early; (2) a `sleep`/`wakeup`/`setrun` priority nuance. *Next:*
+stop trying to align instructions — instead measure the kernel's own clock: read
+V6's `time`/`lbolt` counter over a fixed instruction budget and compare ticks-per-
+kernel-second vs SimH; and check the WAIT-idle path advances exactly one tick per
+idle iteration (no double-tick). NOTE per CLAUDE.md this is deep "chase-the-PC"
+territory; the boot-to-`login:` thermometer is met and every subsystem probe is
+byte-identical to SimH, so this tail does not gate verified correctness.
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|
