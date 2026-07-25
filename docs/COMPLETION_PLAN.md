@@ -370,8 +370,17 @@ green in CI; the core is entirely unchanged (frontends depend on the core, never
 the reverse).
 
 ## P9 — Verified fast mode
-- [ ] Exact-skip scheduler (`next_event()`/`skip(n)`), proven bit-identical vs the
-      full probe+golden suite and long boot-state hashes before it ships.
+- [x] **P9a** Identity harness — `pdp11_state_hash`, a 64-bit FNV-1a over every
+      bit of architectural + timing state a fast mode must reproduce (registers,
+      banked files, MMU, FP, interrupt/clock/console, device registers, cache,
+      instruction/time accounting, all of physical memory, attached disk/tape
+      media), host pointers excluded. Unit tests: deterministic across equal
+      runs, and sensitive to a single perturbed memory word. This is the oracle
+      the idle-skip scheduler is checked against. **[A]**
+- [ ] **P9b** Idle-skip scheduler (`next_event()`/`skip(n)`): when the CPU is in
+      WAIT, advance emulated time to the next scheduled event instead of spinning.
+      Proven bit-identical (state hash **and** `time_ns`) vs the reference core
+      over the full probe+golden suite and a long boot-state hash before it ships.
 
 ## P10 — Broaden to the full model range
 - [ ] Subset CPU options / MMU / bus off the 11/70 superset for each model:

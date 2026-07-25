@@ -1032,6 +1032,60 @@ static void test_tm11_completion_interrupts_through_224(void) {
     TEST_ASSERT_EQUAL_HEX16(0003000u, cpu->r[PDP11_PC]); // vectored to handler
 }
 
+// --- P9 identity harness: the state hash is deterministic and complete -------
+
+// Run a short deterministic program (a counting loop) on a fresh CPU from a
+// clean state, returning the state hash after it halts. Used to prove two runs
+// of the same program reach a bit-identical machine state.
+static uint64_t run_counting_program_and_hash(void) {
+    pdp11_cpu *c = pdp11_cpu_create();
+    TEST_ASSERT_NOT_NULL(c);
+    // MOV #5,R0 ; SOB R0,. ; HALT  — decrements R0 to zero, then halts.
+    const uint16_t prog[] = {0012700u, 0000005u, 0077001u, 0000000u};
+    for (size_t i = 0; i < sizeof prog / sizeof prog[0]; ++i) {
+        pdp11_mem_write_word(c->mem, 001000u + (uint32_t)(i * 2u), prog[i]);
+    }
+    c->r[PDP11_PC] = 001000u;
+    for (int steps = 0; steps < 100 && !c->halted; ++steps) {
+        pdp11_cpu_step(c);
+    }
+    TEST_ASSERT_TRUE(c->halted);
+    uint64_t h = pdp11_state_hash(c);
+    pdp11_cpu_destroy(c);
+    return h;
+}
+
+static void test_the_state_hash_is_identical_across_two_equal_runs(void) {
+    // The reference core is deterministic: the same program from the same reset
+    // state must reach a byte-identical machine state, hash included. This is
+    // the invariant a verified fast mode is later checked against.
+    uint64_t a = run_counting_program_and_hash();
+    uint64_t b = run_counting_program_and_hash();
+    TEST_ASSERT_EQUAL_HEX64(a, b);
+}
+
+static void test_the_state_hash_changes_when_a_single_memory_word_differs(void) {
+    // The hash must actually cover memory: flipping one word after the run
+    // perturbs it. (Guards against a hash that silently ignores whole regions.)
+    uint64_t base = run_counting_program_and_hash();
+
+    pdp11_cpu *c = pdp11_cpu_create();
+    TEST_ASSERT_NOT_NULL(c);
+    const uint16_t prog[] = {0012700u, 0000005u, 0077001u, 0000000u};
+    for (size_t i = 0; i < sizeof prog / sizeof prog[0]; ++i) {
+        pdp11_mem_write_word(c->mem, 001000u + (uint32_t)(i * 2u), prog[i]);
+    }
+    c->r[PDP11_PC] = 001000u;
+    for (int steps = 0; steps < 100 && !c->halted; ++steps) {
+        pdp11_cpu_step(c);
+    }
+    pdp11_mem_write_word(c->mem, 020000u, 1u); // touch an otherwise-zero word
+    uint64_t perturbed = pdp11_state_hash(c);
+    pdp11_cpu_destroy(c);
+
+    TEST_ASSERT_NOT_EQUAL_UINT64(base, perturbed);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -1110,5 +1164,7 @@ int main(void) {
     RUN_TEST(test_tm11_write_record_stores_to_tape);
     RUN_TEST(test_tm11_reading_a_file_mark_sets_eof);
     RUN_TEST(test_tm11_completion_interrupts_through_224);
+    RUN_TEST(test_the_state_hash_is_identical_across_two_equal_runs);
+    RUN_TEST(test_the_state_hash_changes_when_a_single_memory_word_differs);
     return UNITY_END();
 }

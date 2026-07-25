@@ -137,6 +137,13 @@ void pdp11_cpu_destroy(pdp11_cpu *cpu);
 // Clear registers, PSW, and the halted flag. Does not clear memory.
 void pdp11_cpu_reset(pdp11_cpu *cpu);
 
+// Deterministic 64-bit hash of all architectural + timing state (registers,
+// banked files, MMU, FP, interrupt/clock/console, device registers, cache,
+// instruction/time accounting, all of physical memory, and attached media),
+// excluding host pointers. The P9 identity oracle: a verified fast mode must
+// produce a bit-identical hash to the reference core at every checkpoint.
+uint64_t pdp11_state_hash(const pdp11_cpu *cpu);
+
 // Fetch, decode, and execute exactly one instruction. A HALT sets `halted` and
 // leaves the PC past the HALT word; further steps while halted are no-ops.
 void pdp11_cpu_step(pdp11_cpu *cpu);

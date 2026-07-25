@@ -122,6 +122,108 @@ void pdp11_cpu_reset(pdp11_cpu *cpu) {
     pdp11_cache_reset(&cpu->cache);
 }
 
+// --- Deterministic state hash (P9 identity harness) -------------------------
+// A 64-bit FNV-1a over every bit of *architectural and timing* state that the
+// reference core must reproduce exactly: registers, banked files, MMU, FP,
+// interrupt/clock/console state, device controller registers, cache-timing
+// state, the instruction/time accounting, all of physical memory, and the
+// contents of any attached disk/tape media. Host-specific pointers (mem,
+// console_out/ctx, disk/tape backing pointers) and the abort setjmp buffer are
+// excluded — they are not machine state and vary run to run. This is the oracle
+// a verified fast mode must match bit-for-bit against the reference core.
+static void fnv1a(uint64_t *h, const void *p, size_t n) {
+    const uint8_t *b = (const uint8_t *)p;
+    for (size_t i = 0; i < n; ++i) {
+        *h ^= b[i];
+        *h *= 0x100000001b3ull;
+    }
+}
+
+uint64_t pdp11_state_hash(const pdp11_cpu *cpu) {
+    uint64_t h = 0xcbf29ce484222325ull; // FNV offset basis
+
+    // CPU visible + hidden architectural state.
+    fnv1a(&h, cpu->r, sizeof cpu->r);
+    fnv1a(&h, &cpu->psw, sizeof cpu->psw);
+    fnv1a(&h, &cpu->halted, sizeof cpu->halted);
+    fnv1a(&h, &cpu->waiting, sizeof cpu->waiting);
+    fnv1a(&h, &cpu->trace_pending, sizeof cpu->trace_pending);
+    fnv1a(&h, &cpu->cc_frozen, sizeof cpu->cc_frozen);
+    fnv1a(&h, &cpu->pirq, sizeof cpu->pirq);
+    fnv1a(&h, cpu->regfile, sizeof cpu->regfile);
+    fnv1a(&h, cpu->stackfile, sizeof cpu->stackfile);
+
+    // MMU (KT11).
+    fnv1a(&h, &cpu->mmr0, sizeof cpu->mmr0);
+    fnv1a(&h, &cpu->mmr3, sizeof cpu->mmr3);
+    fnv1a(&h, cpu->par, sizeof cpu->par);
+    fnv1a(&h, cpu->pdr, sizeof cpu->pdr);
+    fnv1a(&h, cpu->ub_map, sizeof cpu->ub_map);
+
+    // FP11-C.
+    fnv1a(&h, cpu->fac, sizeof cpu->fac);
+    fnv1a(&h, &cpu->fps, sizeof cpu->fps);
+    fnv1a(&h, &cpu->fec, sizeof cpu->fec);
+    fnv1a(&h, &cpu->fea, sizeof cpu->fea);
+
+    // Interrupts, KW11-L clock, DL11 console registers.
+    fnv1a(&h, &cpu->int_req, sizeof cpu->int_req);
+    fnv1a(&h, &cpu->clk_csr, sizeof cpu->clk_csr);
+    fnv1a(&h, &cpu->clk_tick_ns, sizeof cpu->clk_tick_ns);
+    fnv1a(&h, &cpu->clk_next_ns, sizeof cpu->clk_next_ns);
+    fnv1a(&h, &cpu->tti_csr, sizeof cpu->tti_csr);
+    fnv1a(&h, &cpu->tti_buf, sizeof cpu->tti_buf);
+    fnv1a(&h, &cpu->tto_csr, sizeof cpu->tto_csr);
+    fnv1a(&h, &cpu->tto_buf, sizeof cpu->tto_buf);
+    fnv1a(&h, &cpu->tto_busy, sizeof cpu->tto_busy);
+    fnv1a(&h, &cpu->tto_done_ns, sizeof cpu->tto_done_ns);
+
+    // Device controller registers (media pointers excluded; the media contents
+    // are folded in separately below).
+    fnv1a(&h, &cpu->rk.rkcs, 6u * sizeof(uint16_t)); // rkcs..rkds contiguous
+    fnv1a(&h, &cpu->rk.disk_words, sizeof cpu->rk.disk_words);
+    fnv1a(&h, &cpu->rk.busy, sizeof cpu->rk.busy);
+    fnv1a(&h, &cpu->rk.done_ns, sizeof cpu->rk.done_ns);
+
+    fnv1a(&h, &cpu->rp.cs1, 10u * sizeof(uint16_t)); // cs1..er1 contiguous
+    fnv1a(&h, &cpu->rp.disk_words, sizeof cpu->rp.disk_words);
+    fnv1a(&h, &cpu->rp.busy, sizeof cpu->rp.busy);
+    fnv1a(&h, &cpu->rp.done_ns, sizeof cpu->rp.done_ns);
+
+    fnv1a(&h, &cpu->tm.sta, 6u * sizeof(uint16_t)); // sta..rdl contiguous
+    fnv1a(&h, &cpu->tm.tape_len, sizeof cpu->tm.tape_len);
+    fnv1a(&h, &cpu->tm.pos, sizeof cpu->tm.pos);
+    fnv1a(&h, &cpu->tm.wrp, sizeof cpu->tm.wrp);
+    fnv1a(&h, &cpu->tm.busy, sizeof cpu->tm.busy);
+    fnv1a(&h, &cpu->tm.done_ns, sizeof cpu->tm.done_ns);
+
+    // Cache tags/valid/victim + miss count (timing state).
+    fnv1a(&h, &cpu->cache, sizeof cpu->cache);
+
+    // Timing + accounting.
+    fnv1a(&h, &cpu->time_ns, sizeof cpu->time_ns);
+    fnv1a(&h, &cpu->instr_count, sizeof cpu->instr_count);
+
+    // All of physical memory.
+    if (cpu->mem != NULL) {
+        fnv1a(&h, cpu->mem->words, sizeof cpu->mem->words);
+    }
+
+    // Attached media contents (disk writes are machine state a fast mode must
+    // reproduce). Hashed only when attached; size is already folded in above.
+    if (cpu->rk.disk != NULL) {
+        fnv1a(&h, cpu->rk.disk, (size_t)cpu->rk.disk_words * sizeof(uint16_t));
+    }
+    if (cpu->rp.disk != NULL) {
+        fnv1a(&h, cpu->rp.disk, (size_t)cpu->rp.disk_words * sizeof(uint16_t));
+    }
+    if (cpu->tm.tape != NULL) {
+        fnv1a(&h, cpu->tm.tape, (size_t)cpu->tm.tape_len);
+    }
+
+    return h;
+}
+
 // CPU memory access goes through these (MMU relocation + I/O-page decode),
 // defined below. Word accesses fault on odd addresses.
 static uint16_t cpu_read_word(pdp11_cpu *cpu, uint32_t va);
