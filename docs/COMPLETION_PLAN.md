@@ -436,9 +436,14 @@ stream byte-identical to SimH; long-run state hash deterministic.
       11/24, 11/44 and 11/70. On any other model a DMA address is returned
       identity even with MMR3<BME> forced, and the register block reads 0. Unit
       test; 11/70 boot unchanged (hash `e9389aa0b4b3da86`). **[A]**
+- [x] **P10f** Low-end CPU quirks. EXPT gated by model (SimH `HAS_EXPT`): an
+      explicit PSW store via 0177776 alters the T bit only on the 11/04/05/20;
+      every other model — including the 11/70 — preserves the old T. The 11/20's
+      SWAB leaves V unchanged where every later model clears it. Per-model unit
+      tests; 11/70 boot unchanged (hash `e9389aa0b4b3da86`). **[A]**
 - *Remaining P10 tails* (documented, low boot-relevance): Q-bus vs Unibus device
-      set per model; MMR1/MMR2 modelling where present; the 11/04/05/20 EXPT
-      (explicit-PSW-alters-T) and JMP/JSR `(R)+` quirks. The model-selection
+      set per model; MMR1/MMR2 modelling where present; the JMP/JSR `(R)+`
+      post-increment quirk on the 11/05/20. The model-selection
       superset→subset framework and every option the current core models (EIS,
       FP11, base set, SPL/MFPT, PSW, MMU registers, Unibus map, memory ceiling)
       are subset per model and verified against SimH's `cpu_tab`.

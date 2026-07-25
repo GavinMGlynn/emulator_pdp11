@@ -1341,6 +1341,39 @@ static void test_the_unibus_map_is_absent_on_a_model_without_it(void) {
     pdp11_cpu_destroy(c70);
 }
 
+static void test_an_explicit_psw_write_alters_t_only_on_an_expt_model(void) {
+    // Storing a PSW with T set via 0177776: the 11/04/05/20 (HAS_EXPT) take the
+    // new T; every other model — including the 11/70 — keep the old T (here 0).
+    TEST_ASSERT_EQUAL_HEX16(0u, psw_after_write_on_model(PDP11_MODEL_1170, 0000020u) & 0000020u);
+    TEST_ASSERT_EQUAL_HEX16(0u, psw_after_write_on_model(PDP11_MODEL_1145, 0000020u) & 0000020u);
+    TEST_ASSERT_EQUAL_HEX16(0000020u, psw_after_write_on_model(PDP11_MODEL_1104, 0000020u) & 0000020u);
+    TEST_ASSERT_EQUAL_HEX16(0000020u, psw_after_write_on_model(PDP11_MODEL_1120, 0000020u) & 0000020u);
+}
+
+static void test_swab_leaves_the_overflow_flag_unchanged_on_the_11_20(void) {
+    // The 11/20's SWAB does not clear V (SimH: `if (!CPUT_20) V = 0`); every later
+    // model clears it.
+    pdp11_cpu *c20 = pdp11_cpu_create_model(PDP11_MODEL_1120);
+    TEST_ASSERT_NOT_NULL(c20);
+    c20->psw = PDP11_PSW_V;
+    c20->r[PDP11_R0] = 0000401u;
+    c20->r[PDP11_PC] = 001000u;
+    pdp11_mem_write_word(c20->mem, 001000u, 0000300u); // SWAB R0
+    pdp11_cpu_step(c20);
+    TEST_ASSERT_TRUE(c20->psw & PDP11_PSW_V);
+    pdp11_cpu_destroy(c20);
+
+    pdp11_cpu *c70 = pdp11_cpu_create_model(PDP11_MODEL_1170);
+    TEST_ASSERT_NOT_NULL(c70);
+    c70->psw = PDP11_PSW_V;
+    c70->r[PDP11_R0] = 0000401u;
+    c70->r[PDP11_PC] = 001000u;
+    pdp11_mem_write_word(c70->mem, 001000u, 0000300u); // SWAB R0
+    pdp11_cpu_step(c70);
+    TEST_ASSERT_FALSE(c70->psw & PDP11_PSW_V);
+    pdp11_cpu_destroy(c70);
+}
+
 static void test_model_psw_masks_match_the_reference_table(void) {
     TEST_ASSERT_EQUAL_HEX16(0000377u, pdp11_model_lookup(PDP11_MODEL_1120)->psw_mask);
     TEST_ASSERT_EQUAL_HEX16(0170377u, pdp11_model_lookup(PDP11_MODEL_1134)->psw_mask);
@@ -1445,5 +1478,7 @@ int main(void) {
     RUN_TEST(test_mmr3_does_not_exist_on_models_that_predate_it);
     RUN_TEST(test_par_width_narrows_on_the_18bit_models);
     RUN_TEST(test_the_unibus_map_is_absent_on_a_model_without_it);
+    RUN_TEST(test_an_explicit_psw_write_alters_t_only_on_an_expt_model);
+    RUN_TEST(test_swab_leaves_the_overflow_flag_unchanged_on_the_11_20);
     return UNITY_END();
 }

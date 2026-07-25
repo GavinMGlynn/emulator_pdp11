@@ -89,6 +89,10 @@ pdp11_cpu *pdp11_cpu_create_model(pdp11_model model) {
     cpu->has_mark = info->has_mark;
     cpu->has_rtt = info->has_rtt;
     cpu->has_spl = info->has_spl;
+    // HAS_EXPT (SimH): only the 11/04, 11/05 and 11/20 let an explicit PSW store
+    // change the T bit; every other model (incl. the 11/70) preserves it.
+    cpu->has_expt = (model == PDP11_MODEL_1104 || model == PDP11_MODEL_1105
+                     || model == PDP11_MODEL_1120);
     cpu->mfpt_code = info->mfpt_code;
     cpu->psw_mask = info->psw_mask;
     cpu->mmr0_mask = info->mmr0_mask;
@@ -687,7 +691,15 @@ static void io_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
         return;
     }
     switch (a) {
-    case IOPAGE_PSW:  put_psw(cpu, value); cpu->cc_frozen = true; return;
+    case IOPAGE_PSW:
+        // On models without EXPT an explicit PSW store cannot change the T bit
+        // (SimH: keep the old T). This includes the 11/70.
+        if (!cpu->has_expt) {
+            value = (uint16_t)((value & ~PDP11_PSW_T) | (cpu->psw & PDP11_PSW_T));
+        }
+        put_psw(cpu, value);
+        cpu->cc_frozen = true;
+        return;
     case IOPAGE_PIRQ: put_pirq(cpu, value); return;
     case 0177572u:    cpu->mmr0 = (uint16_t)(value & cpu->mmr0_mask); return;
     case 0172516u:    cpu->mmr3 = (uint16_t)(value & cpu->mmr3_mask); return;
@@ -1042,7 +1054,10 @@ static void single_op(pdp11_cpu *cpu, uint16_t word, uint16_t base,
         result = (uint16_t)((((uint32_t)d << 8) | ((uint32_t)d >> 8)) & 0177777u);
         set_flag(cpu, PDP11_PSW_N, (result & 0200u) != 0);
         set_flag(cpu, PDP11_PSW_Z, (result & 0377u) == 0);
-        set_flag(cpu, PDP11_PSW_V, false);
+        // The 11/20 leaves V unchanged; every later model clears it (SimH SWAB).
+        if (cpu->model != PDP11_MODEL_1120) {
+            set_flag(cpu, PDP11_PSW_V, false);
+        }
         set_flag(cpu, PDP11_PSW_C, false);
         break;
     case 0067: // SXT: fill dst with the N bit; Z = !N

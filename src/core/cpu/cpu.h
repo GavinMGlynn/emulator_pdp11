@@ -75,6 +75,7 @@ typedef struct pdp11_cpu {
     pdp11_model model;
     bool has_eis, has_fpp, has_mmu, has_ubm;
     bool has_sxs, has_mark, has_rtt, has_spl;
+    bool has_expt; // explicit PSW writes (via 0177776) can alter the T bit
     uint16_t mfpt_code;
     uint16_t psw_mask; // writable PSW bits for this model
     uint16_t mmr0_mask, mmr3_mask, par_mask, pdr_mask; // KT11 register masks

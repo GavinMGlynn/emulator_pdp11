@@ -67,7 +67,8 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | Model range — PSW-mask subsetting | **working** (P10c) | `put_psw` masks writes to the model's `psw_mask` (SimH `put_PSW: val &= cpu_tab.psw`): the modeless low-end machines (11/20 etc., mask 0000377) drop the current/previous-mode and register-set fields, so a program can never enter a mode the CPU lacks; the reserved MBZ bits (8-10) are unwritable on every model. Per-model unit tests; V6 boot hash unchanged |
 | Model range — MMU-register masks | **working** (P10d) | MMR0/MMR3/PAR/PDR writes masked to the model's bit-widths (SimH `cpu_tab` mm0/mm3/par/pdr): MMR3 absent (mask 0, reads 0) on the 11/34/40/60 and no-MMU machines; PAR narrows to 12 bits on the 18-bit models; on a no-MMU model all four read 0. The 11/70 masks touch only unused bits, so the boot is unchanged (hash `e9389aa0b4b3da86`). Per-model unit tests. (Full I/O-page NXM-on-access to an absent register is a documented Unibus tail) |
 | Model range — Unibus map gated to UBM models | **working** (P10e) | `pdp11_unibus_map` relocates and the UBM registers (0170200-0170377) respond only on models with `has_ubm` (11/24, 11/44, 11/70); on any other model a DMA address is never relocated, even with MMR3<BME> forced. Per-model unit test; 11/70 boot unchanged |
-| Other models — Q-bus device set / MMR1-2 | documented tail | remaining P10 detail |
+| Model range — low-end CPU quirks | **working** (P10f) | EXPT gated (SimH `HAS_EXPT`): an explicit PSW store via 0177776 alters the T bit only on the 11/04/05/20 — every other model, incl. the 11/70, preserves it. The 11/20's SWAB leaves V unchanged where later models clear it. Per-model unit tests; 11/70 boot unchanged |
+| Other models — Q-bus device set / MMR1-2 / (R)+ quirk | documented tail | remaining P10 detail |
 
 ### CPU — what actually works today
 - General registers R0–R7, PSW condition codes (N Z V C) and T bit.
