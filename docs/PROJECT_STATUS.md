@@ -41,7 +41,7 @@ No accuracy claim is made yet — only the subsystems below are verified.
 | Full I/D-space separation | **working** (P3b) | `idspace` probe byte-identical to SimH; unit test |
 | **MMU (KT11) — P3 COMPLETE** | **done** | relocation, aborts, banking, MFP*, I/D space |
 | MMU access control / aborts / MMR0 status | **working** (P3c) | `mmuabort` probe byte-identical to SimH; unit test |
-| MMR1 (register-delta log) + MMR2 (saved PC) | **working** (P3d) | MMR2 latches each instruction's VA; MMR1 records auto-inc/dec deltas as `(delta<<3)\|reg` bytes (SimH `calc_MMR1`), first mod in the low byte; both freeze with MMR0 on a fault, skip PC mods, and are absent on no-MMU models. Readable at 0177574/0177576. Encoding unit-tested against SimH's formula; V6 boot console byte-identical (execution unchanged, same instr/pc), state hash re-baselined to `da04edc609324309` now that MMR2 is hashed |
+| MMR1 (register-delta log) + MMR2 (saved PC) | **working** (P3d) | MMR2 latches each instruction's VA; MMR1 records auto-inc/dec deltas as `(delta<<3)\|reg` bytes (SimH `calc_MMR1`), first mod in the low byte; both freeze with MMR0 on a fault, skip PC mods, and are absent on no-MMU models. Readable at 0177574/0177576. `mmr1` probe (autoincrement-then-fault) **byte-identical to SimH** (MMR1=021, MMR2=the faulting VA, MMR0=020205); also unit-tested. V6 boot console byte-identical (execution unchanged, same instr/pc), state hash re-baselined to `da04edc609324309` now that MMR2 is hashed |
 | Instruction timing (KB11-C tables) | **in progress** (P4a) | timing_suite vs Handbook App. C tables |
 | 11/70 cache (hit/miss timing) | **working** (P4c) | cache_suite; KB11-C sec 2.2 |
 | Per-cycle tick() core + Unibus/Massbus | not started (P4d) | — |

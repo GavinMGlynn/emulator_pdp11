@@ -92,8 +92,10 @@ recovery) and stack-limit yellow/red.
       readable at 0177574/0177576. **[A]** Encoding unit-tested against SimH's
       formula (+2/-2/byte deltas, two-slot ordering, freeze, no-MMU). V6 boot
       console byte-identical, instr/pc unchanged; the state hash re-baselined to
-      `da04edc609324309` now that MMR2 is part of the hashed state. *Ideal
-      follow-up:* a dedicated SimH arch-diff probe over an abort+recovery sequence.
+      `da04edc609324309` now that MMR2 is part of the hashed state. The `mmr1`
+      probe (a `MOV (R1)+, @#<read-only page>` that autoincrements then faults on
+      the write) is **byte-identical to SimH** — R2=MMR1=021, R3=MMR2=the MOV's VA,
+      R0=MMR0=020205 — validating the encoding, saved PC, and freeze-on-abort.
 - *Verify:* fault/abort + relocation probes **[A]**; MMR status **[A]**.
 
 ## P4 — Cache + timing  ← the cycle-accuracy core
