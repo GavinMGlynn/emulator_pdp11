@@ -28,3 +28,7 @@ add_test(NAME sdl_frontend_smoke
     COMMAND pdp11_sdl --frames 30)
 set_tests_properties(sdl_frontend_smoke PROPERTIES
     ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+
+# The console panel (switch register + load-addr/deposit/examine/start/halt)
+# driven headlessly through the same click handler the mouse uses — no window.
+add_test(NAME sdl_console_panel COMMAND pdp11_sdl --selftest)

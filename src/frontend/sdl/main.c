@@ -136,12 +136,47 @@ static uint16_t *load_disk(const char *path, uint32_t *out_words) {
     return disk;
 }
 
+// ---- KY11-style console panel ---------------------------------------------
+// A switch register (16 toggles), an address register, and a data register,
+// with the classic function keys. EXAM/DEP touch physical memory directly (the
+// console has its own path to core); START loads the switch register into the
+// PC and runs. Switches and buttons are operated with the mouse so the keyboard
+// stays dedicated to the DL11 terminal.
+typedef struct {
+    uint16_t sr;   // switch register
+    uint16_t addr; // console address register
+    uint16_t data; // console data register (last examined/deposited word)
+} panel_state;
+
+enum {
+    BTN_HALT, BTN_CONT, BTN_START, BTN_STEP, BTN_LADR, BTN_EXAM, BTN_DEP,
+    BTN_COUNT
+};
+static const char *const btn_label[BTN_COUNT] = {
+    "HALT", "CONT", "STRT", "STEP", "LADR", "EXAM", "DEP",
+};
+
 // ---- rendering ------------------------------------------------------------
 #define GLYPH 8 // SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE
 #define MARGIN 8
 #define WIN_W (MARGIN * 2 + TCOLS * GLYPH)
-#define PANEL_H 40
+#define PANEL_H 74
 #define WIN_H (MARGIN * 3 + TROWS * GLYPH + PANEL_H)
+
+#define PANEL_TOP (float)(MARGIN * 2 + TROWS * GLYPH)
+#define ROW_H 11.0f
+#define LAMP_X0 (float)(MARGIN + 6 * GLYPH) // lamps start after a 4-char label
+#define LAMP_PITCH 9.0f
+#define BTN_W 44.0f
+#define BTN_H 11.0f
+#define BTN_GAP 6.0f
+
+// The clickable rectangle of function button `i`, shared by render + hit-test.
+static SDL_FRect btn_rect(int i) {
+    SDL_FRect b = {(float)MARGIN + (float)i * (BTN_W + BTN_GAP),
+                   PANEL_TOP + 3.0f * ROW_H + 3.0f, BTN_W, BTN_H};
+    return b;
+}
 
 static void draw_text(SDL_Renderer *r, float x, float y, const char *s) {
     SDL_RenderDebugText(r, x, y, s);
@@ -162,7 +197,7 @@ static void draw_lamps(SDL_Renderer *r, float x, float y, uint16_t v) {
 }
 
 static void render(SDL_Renderer *r, const vt_term *t, const pdp11_cpu *cpu,
-                   uint64_t instrs) {
+                   const panel_state *ps, uint64_t instrs) {
     SDL_SetRenderDrawColor(r, 12, 12, 16, 255);
     SDL_RenderClear(r);
 
@@ -176,32 +211,116 @@ static void render(SDL_Renderer *r, const vt_term *t, const pdp11_cpu *cpu,
     }
 
     // Console panel below a divider line.
-    float py = (float)(MARGIN * 2 + TROWS * GLYPH);
     SDL_SetRenderDrawColor(r, 40, 40, 48, 255);
-    SDL_FRect div = {0.0f, py - (float)MARGIN / 2.0f, (float)WIN_W, 1.0f};
+    SDL_FRect div = {0.0f, PANEL_TOP - (float)MARGIN / 2.0f, (float)WIN_W, 1.0f};
     SDL_RenderFillRect(r, &div);
 
+    // Address / data / switch-register lamp rows.
     SDL_SetRenderDrawColor(r, 180, 180, 190, 255);
-    char panel[64];
-    snprintf(panel, sizeof panel, "ADDR");
-    draw_text(r, (float)MARGIN, py, panel);
-    draw_lamps(r, (float)(MARGIN + 6 * GLYPH), py, cpu->r[PDP11_PC]);
-    snprintf(panel, sizeof panel, "DATA");
-    draw_text(r, (float)MARGIN, py + (float)GLYPH * 1.5f, panel);
-    draw_lamps(r, (float)(MARGIN + 6 * GLYPH), py + (float)GLYPH * 1.5f, cpu->psw);
+    draw_text(r, (float)MARGIN, PANEL_TOP + 0.0f * ROW_H, "ADDR");
+    draw_lamps(r, LAMP_X0, PANEL_TOP + 0.0f * ROW_H, ps->addr);
+    draw_text(r, (float)MARGIN, PANEL_TOP + 1.0f * ROW_H, "DATA");
+    draw_lamps(r, LAMP_X0, PANEL_TOP + 1.0f * ROW_H, ps->data);
+    SDL_SetRenderDrawColor(r, 180, 180, 190, 255);
+    draw_text(r, (float)MARGIN, PANEL_TOP + 2.0f * ROW_H, "SR");
+    draw_lamps(r, LAMP_X0, PANEL_TOP + 2.0f * ROW_H, ps->sr);
 
-    SDL_SetRenderDrawColor(r, cpu->halted ? 90 : 255, cpu->halted ? 90 : 60,
+    // A live PC/PSW/RUN readout on the right of the lamp rows.
+    char panel[64];
+    SDL_SetRenderDrawColor(r, cpu->halted ? 90 : 60, cpu->halted ? 90 : 255,
                            60, 255);
-    SDL_FRect run = {(float)(WIN_W - MARGIN - 10), py, 10.0f, 10.0f};
+    SDL_FRect run = {(float)(WIN_W - MARGIN - 10), PANEL_TOP, 10.0f, 10.0f};
     SDL_RenderFillRect(r, &run);
-    SDL_SetRenderDrawColor(r, 180, 180, 190, 255);
-    snprintf(panel, sizeof panel, "PC %06o PSW %06o %s  %lluK",
-             cpu->r[PDP11_PC], cpu->psw, cpu->halted ? "HALT" : "RUN ",
-             (unsigned long long)(instrs / 1000u));
-    draw_text(r, (float)(WIN_W - MARGIN - 34 * GLYPH), py + (float)GLYPH * 1.5f,
+    SDL_SetRenderDrawColor(r, 150, 150, 160, 255);
+    snprintf(panel, sizeof panel, "PC %06o", cpu->r[PDP11_PC]);
+    draw_text(r, (float)(WIN_W - MARGIN - 20 * GLYPH), PANEL_TOP, panel);
+    snprintf(panel, sizeof panel, "PSW %06o %s", cpu->psw,
+             cpu->halted ? "HALT" : "RUN");
+    draw_text(r, (float)(WIN_W - MARGIN - 20 * GLYPH), PANEL_TOP + ROW_H, panel);
+    snprintf(panel, sizeof panel, "%lluK ins", (unsigned long long)(instrs / 1000u));
+    draw_text(r, (float)(WIN_W - MARGIN - 20 * GLYPH), PANEL_TOP + 2.0f * ROW_H,
               panel);
 
+    // Function buttons.
+    for (int i = 0; i < BTN_COUNT; ++i) {
+        SDL_FRect b = btn_rect(i);
+        SDL_SetRenderDrawColor(r, 45, 45, 55, 255);
+        SDL_RenderFillRect(r, &b);
+        SDL_SetRenderDrawColor(r, 90, 90, 105, 255);
+        SDL_RenderRect(r, &b);
+        SDL_SetRenderDrawColor(r, 210, 210, 220, 255);
+        draw_text(r, b.x + 5.0f, b.y + 2.0f, btn_label[i]);
+    }
+
     SDL_RenderPresent(r);
+}
+
+// Act on a mouse click at logical (render) coordinates: toggle a switch, or run
+// a console function.
+static void panel_click(pdp11_cpu *cpu, panel_state *ps, float lx, float ly) {
+    float sr_y = PANEL_TOP + 2.0f * ROW_H;
+    if (ly >= sr_y && ly < sr_y + 9.0f && lx >= LAMP_X0) {
+        int idx = (int)((lx - LAMP_X0) / LAMP_PITCH);
+        if (idx >= 0 && idx < 16) {
+            ps->sr ^= (uint16_t)(1u << (15 - idx));
+        }
+        return;
+    }
+    for (int i = 0; i < BTN_COUNT; ++i) {
+        SDL_FRect b = btn_rect(i);
+        if (lx < b.x || lx >= b.x + b.w || ly < b.y || ly >= b.y + b.h) {
+            continue;
+        }
+        switch (i) {
+        case BTN_HALT:  cpu->halted = true; break;
+        case BTN_CONT:  cpu->halted = false; break;
+        case BTN_START: cpu->r[PDP11_PC] = ps->addr; cpu->halted = false; break;
+        case BTN_STEP:  cpu->halted = false; pdp11_cpu_step(cpu); cpu->halted = true; break;
+        case BTN_LADR:  ps->addr = ps->sr; break;
+        case BTN_EXAM:  ps->data = pdp11_mem_read_word(cpu->mem, ps->addr);
+                        ps->addr = (uint16_t)(ps->addr + 2u); break;
+        case BTN_DEP:   pdp11_mem_write_word(cpu->mem, ps->addr, ps->sr);
+                        ps->data = ps->sr;
+                        ps->addr = (uint16_t)(ps->addr + 2u); break;
+        default: break;
+        }
+        return;
+    }
+}
+
+static float btn_cx(int i) { SDL_FRect b = btn_rect(i); return b.x + b.w / 2.0f; }
+static float btn_cy(int i) { SDL_FRect b = btn_rect(i); return b.y + b.h / 2.0f; }
+
+// Headless self-test of the console panel: drive the function switches through
+// panel_click (covering both hit-testing and the operations) and verify
+// load-address, deposit, examine, start, and halt. Returns 0 on success.
+static int panel_selftest(void) {
+    pdp11_cpu *cpu = pdp11_cpu_create();
+    if (cpu == NULL) {
+        return 2;
+    }
+    panel_state ps = {.sr = 0, .addr = 0, .data = 0};
+    int rc = 0;
+    ps.sr = 01000u;
+    panel_click(cpu, &ps, btn_cx(BTN_LADR), btn_cy(BTN_LADR));
+    if (ps.addr != 01000u) { rc = 1; }
+    ps.sr = 0123456u;
+    panel_click(cpu, &ps, btn_cx(BTN_DEP), btn_cy(BTN_DEP));
+    if (pdp11_mem_read_word(cpu->mem, 01000u) != 0123456u || ps.addr != 01002u) {
+        rc = 1;
+    }
+    ps.addr = 01000u;
+    panel_click(cpu, &ps, btn_cx(BTN_EXAM), btn_cy(BTN_EXAM));
+    if (ps.data != 0123456u || ps.addr != 01002u) { rc = 1; }
+    ps.sr = 02000u;
+    panel_click(cpu, &ps, btn_cx(BTN_LADR), btn_cy(BTN_LADR));
+    panel_click(cpu, &ps, btn_cx(BTN_START), btn_cy(BTN_START));
+    if (cpu->r[PDP11_PC] != 02000u || cpu->halted) { rc = 1; }
+    panel_click(cpu, &ps, btn_cx(BTN_HALT), btn_cy(BTN_HALT));
+    if (!cpu->halted) { rc = 1; }
+    pdp11_cpu_destroy(cpu);
+    fprintf(stderr, "panel selftest: %s\n", rc == 0 ? "OK" : "FAIL");
+    return rc;
 }
 
 // Map an SDL keycode to the byte the DL11 should receive, or -1 for none.
@@ -221,7 +340,8 @@ int main(int argc, char **argv) {
     long frames_limit = -1;      // -1 = run until quit
     float scale = 2.0f;
     uint64_t ips = 400000;       // CPU instructions stepped per rendered frame
-    for (int i = 1; i + 1 <= argc; ++i) {
+    bool selftest = false;
+    for (int i = 1; i < argc; ++i) {
         if (i + 1 < argc && strcmp(argv[i], "--boot-rk") == 0) {
             disk_path = argv[++i];
         } else if (i + 1 < argc && strcmp(argv[i], "--frames") == 0) {
@@ -230,7 +350,13 @@ int main(int argc, char **argv) {
             scale = (float)atof(argv[++i]);
         } else if (i + 1 < argc && strcmp(argv[i], "--ips") == 0) {
             ips = strtoull(argv[++i], NULL, 10);
+        } else if (strcmp(argv[i], "--selftest") == 0) {
+            selftest = true;
         }
+    }
+
+    if (selftest) {
+        return panel_selftest();
     }
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -254,6 +380,7 @@ int main(int argc, char **argv) {
     pdp11_cpu *cpu = pdp11_cpu_create();
     vt_term term;
     vt_init(&term);
+    panel_state ps = {.sr = 0, .addr = 0, .data = 0};
     uint16_t *disk = NULL;
     if (cpu == NULL) {
         SDL_Quit();
@@ -302,6 +429,11 @@ int main(int argc, char **argv) {
                         pdp11_console_input(cpu, (uint8_t)*p);
                     }
                 }
+            } else if (ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+                float lx = 0.0f, ly = 0.0f;
+                SDL_RenderCoordinatesFromWindow(ren, ev.button.x, ev.button.y,
+                                                &lx, &ly);
+                panel_click(cpu, &ps, lx, ly);
             }
         }
 
@@ -310,7 +442,7 @@ int main(int argc, char **argv) {
             ++total;
         }
 
-        render(ren, &term, cpu, total);
+        render(ren, &term, cpu, &ps, total);
 
         if (frames_limit >= 0 && ++frame >= frames_limit) {
             running = false;

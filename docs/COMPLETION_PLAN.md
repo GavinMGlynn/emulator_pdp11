@@ -351,8 +351,23 @@ trap/interrupt/scheduler path under real OS code, all matching SimH.
       SDL3 is absent, so core/CI are unaffected). *Verify:* `--frames N` renders N
       frames under `SDL_VIDEODRIVER=dummy` and exits 0 — wired as the CTest
       `sdl_frontend_smoke` **[A]**; manually, it boots V6 to an interactive shell.
-- *Tails:* a switch-register/toggle row for deposit/examine and single-step;
-  resize/hi-dpi; selectable colour scheme. Not needed for the P8 thermometer.
+- [x] **P8b** KY11-style **switch-register console**: a 16-lamp switch register,
+      address and data registers, and the function switches LOAD-ADDR, EXAM, DEP,
+      START, HALT, CONT, and single-STEP, all operated with the mouse (so the
+      keyboard stays dedicated to the terminal). EXAM/DEP touch physical core
+      directly and auto-increment; START loads the switch register into the PC and
+      runs; STEP executes one instruction. *Verify:* a headless `--selftest` drives
+      the same click handler the mouse uses and checks deposit/examine round-trip,
+      load-address, start (PC), and halt — wired as the CTest `sdl_console_panel`
+      **[A]**.
+- *Tails (cosmetic):* window resize / hi-dpi; a selectable colour scheme; a
+  distinct SR-toggle visual. None affect the P8 thermometer.
+
+**P8 — COMPLETE.** An interactive SDL3 frontend: VT terminal on the DL11 plus a
+working KY11 console (lamps + switch register + function switches), booting V6 to
+a shell. Two headless CTests (`sdl_frontend_smoke`, `sdl_console_panel`) keep it
+green in CI; the core is entirely unchanged (frontends depend on the core, never
+the reverse).
 
 ## P9 — Verified fast mode
 - [ ] Exact-skip scheduler (`next_event()`/`skip(n)`), proven bit-identical vs the
