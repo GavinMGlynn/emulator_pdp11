@@ -95,11 +95,18 @@ static void test_div_register_base_is_900ns(void) {
     TEST_ASSERT_EQUAL_UINT32(900, pdp11_instr_timing(0071002u).ns); // DIV R2,R0
 }
 
+// FP11 base = 450 ns preinteraction + address calc (App. C.2); the per-
+// instruction FP execution time is added at execution. LDFPS R0 (reg) = 450.
+static void test_fp_base_is_preinteraction_plus_address(void) {
+    TEST_ASSERT_EQUAL_UINT32(450, pdp11_instr_timing(0170100u).ns); // LDFPS R0
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_ash_register_base_is_750ns);
     RUN_TEST(test_ashc_register_base_is_900ns);
     RUN_TEST(test_div_register_base_is_900ns);
+    RUN_TEST(test_fp_base_is_preinteraction_plus_address);
     RUN_TEST(test_add_reg_reg_is_300ns);
     RUN_TEST(test_clr_pc_gets_the_r7_penalty_900ns);
     RUN_TEST(test_jmp_deferred_is_900ns);

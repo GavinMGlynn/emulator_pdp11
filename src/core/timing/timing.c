@@ -180,6 +180,16 @@ pdp11_timing pdp11_instr_timing(uint16_t word) {
         return t;
     }
 
+    // FP11-C (top nibble 017). Handbook App. C.2: Preinteraction (450 ns, fixed)
+    // + Address Calculation (by operand mode) here; the per-instruction Floating
+    // Point execution time is added at execution (cpu->eis_extra_ns). The CPU/FP
+    // parallel-processing overlap ("Wait Time") is not modelled, so this is the
+    // non-overlapped upper bound — a documented approximation.
+    if (top == 017) {
+        pdp11_timing t = {450 + addr_ns[dmode], 1 + addr_cyc[dmode]};
+        return t;
+    }
+
     // Single-operand instructions (word 0050-0067, byte 1050-1067).
     uint16_t code = (uint16_t)((word >> 6) & 01777u);
     uint16_t base = (uint16_t)(code & 0777u);

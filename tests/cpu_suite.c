@@ -1480,6 +1480,16 @@ static void test_div_of_a_real_operand_takes_7050ns(void) {
     TEST_ASSERT_EQUAL_UINT64(7050u, cpu->time_ns - before);
 }
 
+static void test_ldfps_takes_fp_preinteraction_plus_execution_time(void) {
+    // LDFPS R0: 450 ns preinteraction + 0 address (reg) + 180 ns FP exec = 630 ns.
+    cpu->r[PDP11_R0] = 0;
+    const uint16_t prog[] = {0170100u}; // LDFPS R0
+    deposit(001000, prog, 1);
+    uint64_t before = cpu->time_ns;
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_UINT64(630u, cpu->time_ns - before);
+}
+
 static void test_div_by_zero_takes_only_900ns(void) {
     cpu->r[PDP11_R0] = 0;
     cpu->r[PDP11_R1] = 100;
@@ -1607,5 +1617,6 @@ int main(void) {
     RUN_TEST(test_ash_adds_150ns_of_execution_time_per_shift);
     RUN_TEST(test_div_of_a_real_operand_takes_7050ns);
     RUN_TEST(test_div_by_zero_takes_only_900ns);
+    RUN_TEST(test_ldfps_takes_fp_preinteraction_plus_execution_time);
     return UNITY_END();
 }

@@ -1842,9 +1842,32 @@ static void write_fp(pdp11_cpu *cpu, fp_op o, int len_words, uint64_t v) {
 // FP11 instruction decode (top nibble 017). P5a: control group. P5b: load/store
 // (LDf/STf) and CLR/TST/ABS/NEG. P5c: full arithmetic (ADD/SUB/MUL/DIV/MOD/CMP),
 // the LDC/STC/LDEXP/STEXP conversions, and the FEC/FEA + FPE-trap exception model.
+// Representative Floating Point execution time (ns) per instruction class, from
+// the PDP-11/70 Handbook App. C.2 table (single F / double D where they differ).
+// Data-dependent instructions (ADD/SUB/MUL/DIV/MOD) list a range there; the
+// shortest is used, so this is PROVISIONAL for those, and the CPU/FP overlap is
+// not modelled (see the timing module).
+static uint32_t fp_exec_ns(int major, int subop, bool dbl) {
+    switch (major) {
+    case 002: return dbl ? 3060u : 1800u; // MULf
+    case 003: return dbl ? 5990u : 2880u; // MODf
+    case 004: return 900u;                // ADDf
+    case 005: return 360u;                // LDf
+    case 006: return 900u;                // SUBf
+    case 007: return 540u;                // CMPf
+    case 010: return 360u;                // STf
+    case 011: return dbl ? 3120u : 1920u; // DIVf
+    case 001: return 180u;                // CLR/TST/ABS/NEG
+    case 000: return (subop == 1) ? 180u : 0u; // LDFPS 180; CFCC/SETx/STFPS ~0
+    default:  return 540u;                // LDEXP/STEXP/LDCif/STCfi/LDCff (repr.)
+    }
+}
+
 static void op_fp11(pdp11_cpu *cpu, uint16_t word) {
     int major = (word >> 8) & 017;
     int subop = (word >> 6) & 03;
+    // Floating Point execution time, added to the preinteraction + address time.
+    cpu->eis_extra_ns = fp_exec_ns(major, subop, (cpu->fps & FPS_D) != 0);
     uint8_t spec = (uint8_t)(word & 077u);
     int len = (cpu->fps & FPS_D) ? 4 : 2;
     int olen = (len == 4) ? 2 : 4;              // the "other" precision length
