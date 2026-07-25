@@ -136,6 +136,13 @@ typedef struct pdp11_cpu {
     uint16_t par[64];
     uint16_t pdr[64];
 
+    // 11/70 CPU/system registers in the I/O page (SimH CPU70_rd/wr, SR/DR).
+    // Most are diagnostic; modelled so software reads them instead of taking a
+    // non-existent-memory trap. sr = console switch register (read), dr = display
+    // register (write), memerr/ccr/hitmiss/cpuerr/mbrk per the KB11-C. stklim is
+    // the stack-limit register (its yellow/red trap logic is elsewhere).
+    uint16_t sr, dr, memerr, ccr, hitmiss, cpuerr, mbrk, stklim;
+
     // Banked registers. R0-R5 have two sets (PSW<11>); the inactive set lives in
     // regfile. R6 (SP) is banked per mode (Kernel/Super/User); the inactive SPs
     // live in stackfile. The active set/SP is always in r[]. (P3b)

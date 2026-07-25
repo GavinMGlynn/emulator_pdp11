@@ -134,6 +134,8 @@ void pdp11_cpu_reset(pdp11_cpu *cpu) {
     cpu->mmr3 = 0;
     cpu->mmr1 = 0;
     cpu->mmr2 = 0;
+    cpu->sr = cpu->dr = cpu->memerr = cpu->ccr = 0;
+    cpu->hitmiss = cpu->cpuerr = cpu->mbrk = cpu->stklim = 0;
     for (int i = 0; i < 32; ++i) {
         cpu->ub_map[i] = 0;
     }
@@ -226,6 +228,14 @@ uint64_t pdp11_state_hash(const pdp11_cpu *cpu) {
     fnv1a(&h, &cpu->mmr1, sizeof cpu->mmr1);
     fnv1a(&h, &cpu->mmr2, sizeof cpu->mmr2);
     fnv1a(&h, &cpu->mmr3, sizeof cpu->mmr3);
+    fnv1a(&h, &cpu->sr, sizeof cpu->sr);
+    fnv1a(&h, &cpu->dr, sizeof cpu->dr);
+    fnv1a(&h, &cpu->memerr, sizeof cpu->memerr);
+    fnv1a(&h, &cpu->ccr, sizeof cpu->ccr);
+    fnv1a(&h, &cpu->hitmiss, sizeof cpu->hitmiss);
+    fnv1a(&h, &cpu->cpuerr, sizeof cpu->cpuerr);
+    fnv1a(&h, &cpu->mbrk, sizeof cpu->mbrk);
+    fnv1a(&h, &cpu->stklim, sizeof cpu->stklim);
     fnv1a(&h, cpu->par, sizeof cpu->par);
     fnv1a(&h, cpu->pdr, sizeof cpu->pdr);
     fnv1a(&h, cpu->ub_map, sizeof cpu->ub_map);
@@ -675,6 +685,61 @@ static void ubm_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
     cpu->ub_map[pg] &= 017777776u; // 22-bit even base
 }
 
+// --- 11/70 CPU / system registers (I/O page) --------------------------------
+// The switch/display register (0177570) and the CPU register block (0177740-
+// 0177774), modelled per SimH CPU70_rd/CPU70_wr so software reads them instead
+// of taking a non-existent-memory trap. Currently gated to the 11/70 (the other
+// models carry a differently-laid-out block — CPU44/45/60/J — modelled later).
+#define SYSREG_SR    0177570u // switch register (read) / display register (write)
+#define SYSREG_BASE  0177740u // CPU register block base (offset (a>>1)&017)
+#define SYSREG_TOP   0177774u // ...through STKLIM (0177772 PIRQ / 0177776 PSW split off)
+#define SYSID_1170   0011064u // the 11/70 system ID (0x1234)
+
+static bool sysreg_read(const pdp11_cpu *cpu, uint16_t a, uint16_t *out) {
+    if (cpu->model != PDP11_MODEL_1170) {
+        return false;
+    }
+    if (a == SYSREG_SR) { *out = cpu->sr; return true; } // console switch register
+    if (a >= SYSREG_BASE && a <= SYSREG_TOP) {
+        switch ((a >> 1) & 017u) {
+        case 000: case 001: *out = 0; return true;                 // low/high err addr
+        case 002: *out = cpu->memerr; return true;                 // MEMERR
+        case 003: *out = cpu->ccr; return true;                    // CCR
+        case 004: *out = 0; return true;                           // MAINT
+        case 005: *out = cpu->hitmiss; return true;                // hit/miss
+        case 010: *out = (uint16_t)((cpu->mem_top >> 6) - 1u); return true; // low size
+        case 011: *out = 0; return true;                           // high size
+        case 012: *out = SYSID_1170; return true;                  // system ID
+        case 013: *out = (uint16_t)(cpu->cpuerr & 0374u); return true; // CPUERR
+        case 014: *out = cpu->mbrk; return true;                   // microbreak
+        case 016: *out = (uint16_t)(cpu->stklim & 0177400u); return true; // STKLIM
+        default: return false; // 015 = PIRQ, handled in the io_read switch
+        }
+    }
+    return false;
+}
+
+static bool sysreg_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
+    if (cpu->model != PDP11_MODEL_1170) {
+        return false;
+    }
+    if (a == SYSREG_SR) { cpu->dr = value; return true; } // display register
+    if (a >= SYSREG_BASE && a <= SYSREG_TOP) {
+        switch ((a >> 1) & 017u) {
+        case 000: case 001: return true;                     // err addr (read-only)
+        case 002: cpu->memerr = (uint16_t)(cpu->memerr & ~value); return true; // write-1-clear
+        case 003: cpu->ccr = value; return true;             // CCR
+        case 004: case 005: return true;                     // MAINT / hit-miss (ignored)
+        case 010: case 011: case 012: return true;           // sizes, SYSID (read-only)
+        case 013: cpu->cpuerr = 0; return true;              // any write clears CPUERR
+        case 014: cpu->mbrk = (uint16_t)(value & 0377u); return true; // microbreak
+        case 016: cpu->stklim = (uint16_t)(value & 0177400u); return true; // STKLIM
+        default: return false; // 015 = PIRQ, handled in the io_write switch
+        }
+    }
+    return false;
+}
+
 static uint16_t io_read(pdp11_cpu *cpu, uint16_t a) {
     bool is_par;
     int idx;
@@ -708,7 +773,14 @@ static uint16_t io_read(pdp11_cpu *cpu, uint16_t a) {
     if (idx >= 0) {
         return is_par ? cpu->par[idx] : cpu->pdr[idx];
     }
-    return 0; // unmapped I/O register (proper NXM trap arrives with the Unibus)
+    uint16_t sv;
+    if (sysreg_read(cpu, a, &sv)) {
+        return sv;
+    }
+    // A read of a non-existent I/O-page register is a bus timeout: NXM through
+    // vector 4 (matches SimH returning SCPE_NXM for an unclaimed address).
+    cpu_bus_fault(cpu, VEC_BUS);
+    return 0; // unreachable — cpu_bus_fault longjmps
 }
 
 static void io_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
@@ -754,8 +826,13 @@ static void io_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
         } else {
             cpu->pdr[idx] = (uint16_t)(value & cpu->pdr_mask);
         }
+        return;
     }
-    // else: unmapped — dropped for now (NXM trap with the Unibus at P6).
+    if (sysreg_write(cpu, a, value)) {
+        return;
+    }
+    // A write to a non-existent I/O-page register is a bus timeout: NXM (vector 4).
+    cpu_bus_fault(cpu, VEC_BUS);
 }
 
 static int cur_mode(const pdp11_cpu *cpu) { return (cpu->psw >> 14) & 03; }
