@@ -63,7 +63,7 @@ a booted-machine diff.
 | **KT11 MMU** | 22-bit relocation, PAR/PDR (Kernel/Super/User × I/D), access-control & page-length aborts, MMR0-3 status, MMR1 register-delta log + MMR2 saved-PC, dual register sets, MFPI/MTPI/MFPD/MTPD |
 | **FP11-C floating point** | Single & double precision, a bit-exact port of the arithmetic; FEC/FEA exception model and the FPE trap |
 | **Timing** | KB11-C instruction times + the 11/70 two-way set-associative cache (hit/miss), EIS per-shift/per-operand times, FP11 preinteraction + execution times |
-| **Devices** | KW11-L line clock, DL11 console, RK11/RK05, RP04 via RH70 Massbus, TM11/TU10 tape, **RL11/RL01-RL02**; the Unibus Map; the 11/70 CPU/system registers; I/O-page NXM |
+| **Devices** | KW11-L line clock, DL11 console, RK11/RK05, RP04 via RH70 Massbus, TM11/TU10 tape, **RL11/RL01-RL02** disk, **RX11/RX01** floppy; the Unibus Map; the 11/70 CPU/system registers; I/O-page NXM |
 | **Model range** | All 20 models subset per-model from the 11/70 (options, base instruction set, PSW mask, MMU registers, memory ceiling, quirks) — from SimH's `cpu_tab` |
 | **Verified fast mode** | A deterministic full-machine-state hash (the identity oracle) + an exact idle-skip scheduler that jumps WAIT to the next scheduled event |
 | **Frontends** | A deterministic **headless** frontend (boots disks, scriptable console) and an interactive **SDL3** frontend (VT terminal on the DL11 + a KY11 console panel) |

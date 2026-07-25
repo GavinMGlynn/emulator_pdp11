@@ -484,6 +484,13 @@ stream byte-identical to SimH; long-run state hash deterministic.
       computed from drive state); DMA read/write/seek/get-status/interrupt
       unit-tested. The drive is modelled always-ready (SimH's load/spin/brush/
       lock state machine is a documented simplification).
+- [x] **P10i** RX11/RX01 8-inch floppy. A programmed-I/O device (RXCS 0177170,
+      RXDB 0177172, BR5, vector 0264) modelled on SimH pdp11_rx.c: the transfer-
+      request (TR) command state machine — fill/empty the 128-byte sector buffer,
+      read/write a sector (supply sector then track), read status, read error
+      code — plus the power-up init (DONE|ERR+ecode 010 with no floppy). **[A]**
+      `rx11` register probe byte-identical to SimH; a fill/write/read/empty
+      round-trip and read-status are unit-tested. RX02 double density is a tail.
 - *Remaining P10 tails* (documented, low boot-relevance): Q-bus vs Unibus device
       set per model. (MMR1/MMR2 landed in P3d.) The model-selection
       superset→subset framework and every option the current core models (EIS,

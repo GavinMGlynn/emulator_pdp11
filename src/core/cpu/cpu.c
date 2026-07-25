@@ -6,6 +6,7 @@
 #include "console/console.h"
 #include "devices/rk11.h"
 #include "devices/rl11.h"
+#include "devices/rx11.h"
 #include "devices/rp11.h"
 #include "devices/tm11.h"
 #include "fp/fp.h"
@@ -205,6 +206,20 @@ void pdp11_cpu_reset(pdp11_cpu *cpu) {
     cpu->rl.rlba = cpu->rl.rlda = cpu->rl.rlmp = cpu->rl.rlbae = 0;
     cpu->rl.trk = 0;
     cpu->rl.busy = false;
+    // RX11 floppy: the controller power-up init reads track 1 / sector 1; with no
+    // floppy attached it fails (ERR + error code 010), matching SimH. Disk buffer
+    // preserved across reset.
+    {
+        bool rx_att = cpu->rx.disk != NULL;
+        // Attached: init reads track 1/sector 1 OK -> RXES = ID|DRDY, no error.
+        // Detached: init fails -> DONE|ERR, error code 010, RXES = 0 (SimH).
+        cpu->rx.rxes = rx_att ? (uint8_t)(0004u | 0200u) : 0u; // ID | DRDY
+        cpu->rx.ecode = rx_att ? 0u : 0010u;
+        cpu->rx.rxcs = (uint16_t)(0040u | (rx_att ? 0u : 0100000u)); // DONE | ERR
+        cpu->rx.rxdb = cpu->rx.rxes;
+        cpu->rx.track = cpu->rx.sector = 0;
+        cpu->rx.state = cpu->rx.bptr = cpu->rx.cur_track = 0;
+    }
     pdp11_cache_reset(&cpu->cache);
 }
 
@@ -298,6 +313,11 @@ uint64_t pdp11_state_hash(const pdp11_cpu *cpu) {
     fnv1a(&h, &cpu->rl.disk_words, sizeof cpu->rl.disk_words);
     fnv1a(&h, &cpu->rl.busy, sizeof cpu->rl.busy);
     fnv1a(&h, &cpu->rl.done_ns, sizeof cpu->rl.done_ns);
+
+    fnv1a(&h, &cpu->rx.rxcs, sizeof cpu->rx.rxcs);
+    fnv1a(&h, &cpu->rx.rxdb, 8u); // rxdb..cur_track (8 contiguous bytes)
+    fnv1a(&h, cpu->rx.buf, sizeof cpu->rx.buf);
+    fnv1a(&h, &cpu->rx.disk_bytes, sizeof cpu->rx.disk_bytes);
 
     // Cache tags/valid/victim + miss count (timing state).
     fnv1a(&h, &cpu->cache, sizeof cpu->cache);
@@ -525,6 +545,7 @@ static const struct { uint8_t ipl; uint16_t vec; } int_tab[] = {
     [PDP11_INT_RP] = {RP_IPL, RP_VEC},
     [PDP11_INT_TM] = {TM_IPL, TM_VEC},
     [PDP11_INT_RL] = {RL_IPL, RL_VEC},
+    [PDP11_INT_RX] = {RX_IPL, RX_VEC},
 };
 #define NUM_INT (sizeof int_tab / sizeof int_tab[0])
 
@@ -832,6 +853,8 @@ static uint16_t io_read(pdp11_cpu *cpu, uint16_t a) {
         return pdp11_tm_read(cpu, a); // TM11 tape
     case RL_RLCS: case RL_RLBA: case RL_RLDA: case RL_RLMP:
         return pdp11_rl_read(cpu, a); // RL11 disk
+    case RX_RXCS: case RX_RXDB:
+        return pdp11_rx_read(cpu, a); // RX11 floppy
     default:
         if (a >= RP_CSR && a <= RP_END) {
             return pdp11_rp_read(cpu, a); // RH70 + RP04 disk
@@ -884,6 +907,8 @@ static void io_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
         pdp11_tm_write(cpu, a, value); return; // TM11 tape
     case RL_RLCS: case RL_RLBA: case RL_RLDA: case RL_RLMP:
         pdp11_rl_write(cpu, a, value); return; // RL11 disk
+    case RX_RXCS: case RX_RXDB:
+        pdp11_rx_write(cpu, a, value); return; // RX11 floppy
     default:
         if (a >= RP_CSR && a <= RP_END) {
             pdp11_rp_write(cpu, a, value); return; // RH70 + RP04 disk

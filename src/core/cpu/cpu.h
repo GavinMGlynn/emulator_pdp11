@@ -9,6 +9,7 @@
 #include "devices/rk11.h"
 #include "devices/rp11.h"
 #include "devices/rl11.h"
+#include "devices/rx11.h"
 #include "devices/tm11.h"
 #include "memory/memory.h"
 
@@ -128,6 +129,7 @@ typedef struct pdp11_cpu {
     // TM11 / TU10 magnetic tape (P6).
     pdp11_tm11 tm;
     pdp11_rl11 rl;
+    pdp11_rx11 rx;
 
     // KT11 memory management (P3). MMR0<0> enables relocation; MMR3<M22E>
     // selects 22-bit. The PAR/PDR file is indexed (mode<<4)|(dspace<<3)|page,
@@ -235,7 +237,7 @@ void pdp11_cpu_step(pdp11_cpu *cpu);
 // vector in cpu.c's interrupt table.
 enum { PDP11_INT_CLK = 0, PDP11_INT_TTI = 1, PDP11_INT_TTO = 2,
        PDP11_INT_RK = 3, PDP11_INT_RP = 4, PDP11_INT_TM = 5,
-       PDP11_INT_RL = 6 };
+       PDP11_INT_RL = 6, PDP11_INT_RX = 7 };
 
 // Raise/lower a device interrupt request. The CPU grants the highest-BR pending
 // request whose level exceeds the current PSW priority at an instruction

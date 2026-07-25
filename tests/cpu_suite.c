@@ -777,6 +777,7 @@ static void test_dl11_transmitter_emits_to_the_sink_then_completes(void) {
 // DMA without allocating a whole 1.2M-word drive.
 static uint16_t rk_disk[1024];
 static uint16_t rl_disk[512];
+static uint8_t rx_disk[RX_SIZE];
 
 // Word count register value for an N-word transfer (two's-complement count).
 static uint16_t rk_wc(unsigned n) { return (uint16_t)(0200000u - n); }
@@ -1095,6 +1096,47 @@ static void test_rl11_completion_interrupts_through_160_when_enabled(void) {
     deposit(001000, prog, 1);
     pdp11_cpu_step(cpu);
     TEST_ASSERT_EQUAL_HEX16(0003000u, cpu->r[PDP11_PC]); // vectored to the handler
+}
+
+// --- RX11 / RX01 floppy -----------------------------------------------------
+
+static void test_rx11_fill_write_read_empty_round_trips_a_sector(void) {
+    pdp11_rx_attach(cpu, rx_disk, RX_SIZE);
+    // FILL BUFFER (func 0) with a 128-byte pattern.
+    pdp11_rx_write(cpu, RX_RXCS, (0u << 1) | 1u); // FUNC=FILL, GO
+    for (int i = 0; i < 128; ++i) {
+        pdp11_rx_write(cpu, RX_RXDB, (uint16_t)(0100u + (unsigned)i));
+    }
+    // WRITE SECTOR (func 2), sector 1 / track 1 -> buffer to disk.
+    pdp11_rx_write(cpu, RX_RXCS, (2u << 1) | 1u);
+    pdp11_rx_write(cpu, RX_RXDB, 1u);             // sector
+    pdp11_rx_write(cpu, RX_RXDB, 1u);             // track -> transfer completes
+    TEST_ASSERT_TRUE(cpu->rx.rxcs & 0000040u);    // DONE
+    uint32_t da = (1u * 26u + 0u) * 128u;
+    TEST_ASSERT_EQUAL_HEX8(0100u, rx_disk[da]);
+    TEST_ASSERT_EQUAL_HEX8((uint8_t)(0100u + 127u), rx_disk[da + 127u]);
+
+    // READ SECTOR (func 3) 1/1 back into the buffer, then EMPTY BUFFER (func 1).
+    pdp11_rx_write(cpu, RX_RXCS, (3u << 1) | 1u);
+    pdp11_rx_write(cpu, RX_RXDB, 1u);
+    pdp11_rx_write(cpu, RX_RXDB, 1u);
+    TEST_ASSERT_TRUE(cpu->rx.rxcs & 0000040u);
+    pdp11_rx_write(cpu, RX_RXCS, (1u << 1) | 1u); // FUNC=EMPTY, GO
+    uint8_t first = (uint8_t)pdp11_rx_read(cpu, RX_RXDB);
+    uint8_t last = 0;
+    for (int i = 1; i < 128; ++i) {
+        last = (uint8_t)pdp11_rx_read(cpu, RX_RXDB);
+    }
+    TEST_ASSERT_EQUAL_HEX8(0100u, first);
+    TEST_ASSERT_EQUAL_HEX8((uint8_t)(0100u + 127u), last);
+}
+
+static void test_rx11_read_status_reports_drive_ready(void) {
+    pdp11_rx_attach(cpu, rx_disk, RX_SIZE);
+    pdp11_rx_write(cpu, RX_RXCS, (5u << 1) | 1u); // FUNC=READ STATUS, GO
+    TEST_ASSERT_TRUE(cpu->rx.rxcs & 0000040u);    // DONE
+    // RXDB holds RXES with the drive-ready bit (0200) set for the attached drive.
+    TEST_ASSERT_TRUE(pdp11_rx_read(cpu, RX_RXDB) & 0200u);
 }
 
 // --- P9 identity harness: the state hash is deterministic and complete -------
@@ -1655,6 +1697,8 @@ int main(void) {
     RUN_TEST(test_rl11_write_transfers_memory_to_disk);
     RUN_TEST(test_rl11_get_status_reports_a_ready_drive);
     RUN_TEST(test_rl11_completion_interrupts_through_160_when_enabled);
+    RUN_TEST(test_rx11_fill_write_read_empty_round_trips_a_sector);
+    RUN_TEST(test_rx11_read_status_reports_drive_ready);
     RUN_TEST(test_the_state_hash_is_identical_across_two_equal_runs);
     RUN_TEST(test_a_wait_idle_skips_straight_to_the_next_clock_tick);
     RUN_TEST(test_a_wait_idle_skips_to_a_disk_completion_before_the_clock);
