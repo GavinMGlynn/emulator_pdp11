@@ -220,6 +220,33 @@ backing device. This is a V6 environment/scheduler tail — every CPU/MMU/device
 probe is byte-identical to SimH and the boot reaches `login:` (the P7
 thermometer), so it does not gate the emulator's verified correctness.
 
+**Update (2026-07-25, third pass) — it IS a real emulator bug; localised to the
+process resume after a swap.** Got a working SimH console capture at last:
+`set console log=<file>` **plus** the right script shape — arm each rule as
+`expect "@" send "unix\r"` on its *own* line, then a separate `boot rk0` / `go`,
+with `noexpect` between stages (the `expect … ; go` one-liner does not boot).
+With that, **SimH reaches the root shell** on this exact image:
+`@unix / login: root / # echo SHELL_OK / SHELL_OK / #`. So the image supports
+interactive login and our failure is a genuine bug, not the environment: read the
+V6 fs from the image — `/etc/ttys` enables **only** the console (`18-`), and
+`/etc/rc` runs `/etc/update` then mounts `/dev/rk1..3` which neither we nor SimH
+attach, so those mounts fail in both. Ruled out both as the cause.
+
+Diffing RK ops to the shell: **ours matches SimH through op 130** — a process
+**swap** (wr 4000, wr 4004, rd 4000, rd 4004) — then ours hangs while SimH's op
+131 is `rd 3` (the resumed process continues, exec-ing `/bin/login`). Re-dumped
+the swap payload with the Unibus-map fix in place: it now **round-trips
+correctly** (OUT core 0127100 = `170011 010600 011046 …` → IN core 0121100, same
+bytes), so the swap DMA is right — the swapped-in image is good. Therefore the
+divergence is in **executing the resumed process** (a CPU-path bug exposed
+post-swap, or the `retu`/`aretu` context restore), not swap data. Downstream, the
+resumed process thrashes (proc[4] SRUN) and starves the console getty, which is
+why login reads `root` but never echoes/execs. *Next (well-anchored):* the
+swap-in (op 130) is a clean landmark — instruction-align ours vs a SimH trace
+from there (gated SimH per-instruction fprintf enabled only after the 130th RK
+op, using the working boot script) to pin the first divergent instruction in the
+resume path.
+
 ## Timing (DEC paper oracle)
 | Campaign | Ours | DEC source | Status | Notes |
 |----------|------|-----------|--------|-------|
