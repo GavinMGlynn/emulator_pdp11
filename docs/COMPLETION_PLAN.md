@@ -415,9 +415,15 @@ stream byte-identical to SimH; long-run state hash deterministic.
       processor-type code in R0 where present (F-class 3, 11/44 1, J-class 5) and
       is reserved elsewhere — including on the 11/70, which predates it. Per-model
       unit tests; V6 boot hash unchanged (`e9389aa0b4b3da86`). **[A]**
-- [ ] **P10c** MMU presence: on a no-MMU model (11/20/05/04/03) MMR0-2, PAR/PDR,
-      and the mode/regset PSW bits do not exist — accesses are NXM, PSW writes
-      mask to `psw_mask`. 16/18/22-bit relocation width per model; Unibus map only
-      where `has_ubm`.
+- [x] **P10c** PSW-mask subsetting. `put_psw` now masks every program-driven PSW
+      write to the model's `psw_mask` (SimH `put_PSW: val &= cpu_tab.psw`), so the
+      modeless low-end machines (11/20 etc., mask 0000377) cannot set the current/
+      previous-mode or register-set fields, and the reserved MBZ bits (8-10) are
+      unwritable on all models. The 11/70 mask (0174377) covers every meaningful
+      bit, so the boot/goldens are unchanged (hash still `e9389aa0b4b3da86`).
+      Per-model unit tests. **[A]**
+- [ ] **P10d** MMU-register presence: on a no-MMU model (11/20/05/04/03) MMR0-2
+      and PAR/PDR do not respond (NXM). 16/18/22-bit relocation width and the
+      MMR0/3/PAR/PDR bit-masks per model; Unibus map only where `has_ubm`.
 - [ ] **P10d** Remaining per-model detail + Q-bus vs Unibus device set.
 - *Verify:* per-model probes **[A]**; model-specific timing **[T]** where documented.

@@ -72,6 +72,7 @@ typedef struct pdp11_cpu {
     bool has_eis, has_fpp, has_mmu, has_ubm;
     bool has_sxs, has_mark, has_rtt, has_spl;
     uint16_t mfpt_code;
+    uint16_t psw_mask; // writable PSW bits for this model
 
     uint16_t r[8]; // R0-R7 (kernel set; alternate set + modes land later)
     uint16_t psw;  // processor status word

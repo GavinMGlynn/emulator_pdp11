@@ -90,6 +90,7 @@ pdp11_cpu *pdp11_cpu_create_model(pdp11_model model) {
     cpu->has_rtt = info->has_rtt;
     cpu->has_spl = info->has_spl;
     cpu->mfpt_code = info->mfpt_code;
+    cpu->psw_mask = info->psw_mask;
     pdp11_cpu_reset(cpu);
     // Installed memory: 256 KiB by default (matching the oracle's `set cpu 256k`,
     // the V6 boot config), capped at the model's physical ceiling — so an 11/20
@@ -451,6 +452,10 @@ static void put_pirq(pdp11_cpu *cpu, uint16_t value) {
 // register set (PSW<11>) or current mode (PSW<15:14>) changed. All PSW changes
 // that can alter those fields (traps, RTI, writes to 0177776) go through here.
 static void put_psw(pdp11_cpu *cpu, uint16_t new_psw) {
+    // Mask off bits this model cannot hold (SimH put_PSW: val &= cpu_tab.psw).
+    // On the modeless low-end machines this drops the current/previous-mode and
+    // register-set fields, so a program can never enter a mode the CPU lacks.
+    new_psw = (uint16_t)(new_psw & cpu->psw_mask);
     int old_rs = (cpu->psw >> 11) & 01;
     int new_rs = (new_psw >> 11) & 01;
     if (new_rs != old_rs) {

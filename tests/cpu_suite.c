@@ -1256,6 +1256,40 @@ static void test_model_memory_ceilings_follow_the_address_width(void) {
     TEST_ASSERT_EQUAL_HEX32(0020000000u, pdp11_model_lookup(PDP11_MODEL_1170)->max_mem); // 4 MiB
 }
 
+// Store `value` into the PSW the hardware way (MOV #value,@#177776) on a fresh
+// model CPU and report the PSW that stuck.
+static uint16_t psw_after_write_on_model(pdp11_model m, uint16_t value) {
+    pdp11_cpu *c = pdp11_cpu_create_model(m);
+    TEST_ASSERT_NOT_NULL(c);
+    c->r[PDP11_PC] = 001000u;
+    pdp11_mem_write_word(c->mem, 001000u, 0012737u); // MOV #value, @#177776
+    pdp11_mem_write_word(c->mem, 001002u, value);
+    pdp11_mem_write_word(c->mem, 001004u, 0177776u);
+    pdp11_cpu_step(c);
+    uint16_t psw = c->psw;
+    pdp11_cpu_destroy(c);
+    return psw;
+}
+
+static void test_the_psw_mode_and_regset_bits_are_unwritable_on_a_modeless_machine(void) {
+    // The 11/70 keeps the current/previous-mode and register-set bits; the 11/20,
+    // which has neither modes nor an alternate register set, masks them off
+    // (psw_mask 0000377) and keeps only the low byte. Value 0174004 sets cm=pm=
+    // user, rs=1 and Z.
+    TEST_ASSERT_EQUAL_HEX16(0174004u, psw_after_write_on_model(PDP11_MODEL_1170, 0174004u));
+    TEST_ASSERT_EQUAL_HEX16(0000004u, psw_after_write_on_model(PDP11_MODEL_1120, 0174004u));
+    // Even on the 11/70 the reserved MBZ bits (8-10) are not writable — only the
+    // register-set bit (11) of 0007400 survives the mask.
+    TEST_ASSERT_EQUAL_HEX16(0004000u, psw_after_write_on_model(PDP11_MODEL_1170, 0007400u));
+}
+
+static void test_model_psw_masks_match_the_reference_table(void) {
+    TEST_ASSERT_EQUAL_HEX16(0000377u, pdp11_model_lookup(PDP11_MODEL_1120)->psw_mask);
+    TEST_ASSERT_EQUAL_HEX16(0170377u, pdp11_model_lookup(PDP11_MODEL_1134)->psw_mask);
+    TEST_ASSERT_EQUAL_HEX16(0174377u, pdp11_model_lookup(PDP11_MODEL_1170)->psw_mask);
+    TEST_ASSERT_EQUAL_HEX16(0174777u, pdp11_model_lookup(PDP11_MODEL_1173)->psw_mask);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_mov_immediate_to_register_sets_the_value);
@@ -1348,5 +1382,7 @@ int main(void) {
     RUN_TEST(test_mfpt_returns_the_model_code_where_present_and_traps_otherwise);
     RUN_TEST(test_the_11_34_has_eis_but_no_fpp);
     RUN_TEST(test_model_memory_ceilings_follow_the_address_width);
+    RUN_TEST(test_the_psw_mode_and_regset_bits_are_unwritable_on_a_modeless_machine);
+    RUN_TEST(test_model_psw_masks_match_the_reference_table);
     return UNITY_END();
 }
