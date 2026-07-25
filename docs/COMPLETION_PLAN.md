@@ -96,6 +96,12 @@ recovery) and stack-limit yellow/red.
       probe (a `MOV (R1)+, @#<read-only page>` that autoincrements then faults on
       the write) is **byte-identical to SimH** — R2=MMR1=021, R3=MMR2=the MOV's VA,
       R0=MMR0=020205 — validating the encoding, saved PC, and freeze-on-abort.
+- [x] **P3e** MMU completeness details. A program write to a PDR clears the
+      hardware A/W flags (SimH `& ~(PDR_A|PDR_W)`) — `pdraw` probe byte-identical
+      to SimH (write ACF+A+W, read back ACF only). The MMR2=trap-vector load is
+      observationally equivalent to our per-fetch MMR2=PC (SimH overwrites the
+      transient trapea at the handler's own fetch; the frozen MME case, where it
+      matters, keeps the faulting instruction in both).
 - *Verify:* fault/abort + relocation probes **[A]**; MMR status **[A]**.
 
 ## P4 — Cache + timing  ← the cycle-accuracy core

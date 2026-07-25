@@ -824,7 +824,10 @@ static void io_write(pdp11_cpu *cpu, uint16_t a, uint16_t value) {
         if (is_par) {
             cpu->par[idx] = (uint16_t)(value & cpu->par_mask);
         } else {
-            cpu->pdr[idx] = (uint16_t)(value & cpu->pdr_mask);
+            // A program write clears the hardware-managed A (accessed) and W
+            // (written) flags; they are re-set on the next access (SimH masks
+            // them off: (data & pdr) & ~(PDR_A|PDR_W)).
+            cpu->pdr[idx] = (uint16_t)(value & cpu->pdr_mask & ~(PDR_A | PDR_W));
         }
         return;
     }
