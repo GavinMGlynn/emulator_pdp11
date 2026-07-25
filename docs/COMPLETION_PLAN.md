@@ -114,7 +114,7 @@ recovery) and stack-limit yellow/red.
 - *Verify:* fault/abort + relocation probes **[A]**; MMR status **[A]**.
 
 ## P4 — Cache + timing  ← the cycle-accuracy core
-- [~] **P4a** Instruction timing model (src/core/timing): SRC/DST address time by
+- [x] **P4a** Instruction timing model (src/core/timing): SRC/DST address time by
       mode + Execute/Fetch time per instruction class, in ns, from the PDP-11/70
       Handbook App. C tables; a per-instruction time accumulator (cpu->time_ns).
       **[T]** timing_suite checks computed times against the tables (8 cases).

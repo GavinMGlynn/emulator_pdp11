@@ -173,6 +173,10 @@ typedef struct pdp11_cpu {
     // (all-cache-hits; the cache miss model lands at P4c).
     uint64_t instr_count;
     uint64_t time_ns; // KB11-C all-cache-hits execution time (ns)
+    // Extra EF time for the data-dependent EIS instructions (ASH/ASHC per-shift,
+    // DIV per-operand), computed at execution and added to the instruction's base
+    // time; transient, cleared before each instruction.
+    uint32_t eis_extra_ns;
 
     // Cache model (timing only). Total execution time is
     // time_ns + cache.misses * 1020 (1.02 us per read miss).

@@ -1516,8 +1516,12 @@ static void op_div(pdp11_cpu *cpu, uint16_t word) {
         set_flag(cpu, PDP11_PSW_Z, true);
         set_flag(cpu, PDP11_PSW_V, true);
         set_flag(cpu, PDP11_PSW_C, true);
-        return;
+        return; // .90 us EF (by-zero); base time only, no extra
     }
+    // A real divide: Handbook App. C gives 7.05 us shortest .. 8.55 us longest
+    // (operand-dependent; the per-operand microcode span is not published), so
+    // model the shortest — +6.15 us over the .90 us base. PROVISIONAL (range).
+    cpu->eis_extra_ns = 6150u;
     if (srcu == 020000000000u && src2u == 0177777u) { // -2^31 / -1 overflow
         set_flag(cpu, PDP11_PSW_V, true);
         set_flag(cpu, PDP11_PSW_N, false);
@@ -1547,6 +1551,7 @@ static void op_ash(pdp11_cpu *cpu, uint16_t word) {
     uint8_t reg = (uint8_t)((word >> 6) & 07u);
     operand s = decode_operand(cpu, (uint8_t)(word & 077u), false);
     int32_t sh = (int32_t)(read_operand(cpu, s, false) & 077u); // 0..63 shift code
+    cpu->eis_extra_ns = 150u * (uint32_t)(sh <= 31 ? sh : 64 - sh); // +.15 us/shift
     int32_t sign = (cpu->r[reg] & 0100000u) ? 1 : 0;
     int32_t src = sign ? (int32_t)(cpu->r[reg] | ~077777u) : (int32_t)cpu->r[reg];
     int32_t dst;
@@ -1580,6 +1585,7 @@ static void op_ashc(pdp11_cpu *cpu, uint16_t word) {
     uint8_t reg = (uint8_t)((word >> 6) & 07u);
     operand s = decode_operand(cpu, (uint8_t)(word & 077u), false);
     int32_t sh = (int32_t)(read_operand(cpu, s, false) & 077u);
+    cpu->eis_extra_ns = 150u * (uint32_t)(sh <= 31 ? sh : 64 - sh); // +.15 us/shift
     int32_t sign = (cpu->r[reg] & 0100000u) ? 1 : 0;
     int32_t src = (int32_t)(((uint32_t)cpu->r[reg] << 16) | cpu->r[reg | 1]);
     int32_t dst;
@@ -2292,6 +2298,7 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
     }
     cpu->abort_depth = 0;
     cpu->cc_frozen = false; // fresh for this instruction
+    cpu->eis_extra_ns = 0;  // data-dependent EIS extra time, set during execution
 
     // KB11-C MMU status snapshot: unless MMR0 is frozen (holding a prior fault),
     // clear MMR1's register-delta log and latch this instruction's address into
@@ -2345,6 +2352,7 @@ void pdp11_cpu_step(pdp11_cpu *cpu) {
     } else {
         ns = pdp11_instr_timing(word).ns;
     }
+    ns += cpu->eis_extra_ns; // data-dependent EIS extra (0 for everything else)
     cpu->time_ns += ns;
     cpu->instr_count++;
 

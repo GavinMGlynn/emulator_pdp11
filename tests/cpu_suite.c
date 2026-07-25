@@ -1457,6 +1457,40 @@ static void test_mmr1_and_mmr2_freeze_with_mmr0(void) {
     TEST_ASSERT_EQUAL_HEX16(0004000u, cpu->mmr2); // unchanged
 }
 
+static void test_ash_adds_150ns_of_execution_time_per_shift(void) {
+    // ASH R1,R0 with R1=5 (shift left 5): .75 us base + 5 x .15 us = 1.50 us.
+    cpu->r[PDP11_R0] = 1;
+    cpu->r[PDP11_R1] = 5;
+    const uint16_t prog[] = {0072001u}; // ASH R1, R0
+    deposit(001000, prog, 1);
+    uint64_t before = cpu->time_ns;
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_UINT64(1500u, cpu->time_ns - before);
+}
+
+static void test_div_of_a_real_operand_takes_7050ns(void) {
+    // DIV R2 into R0:R1 with a nonzero divisor: .90 us base + 6.15 us = 7.05 us.
+    cpu->r[PDP11_R0] = 0;
+    cpu->r[PDP11_R1] = 100;
+    cpu->r[PDP11_R2] = 7;
+    const uint16_t prog[] = {0071002u}; // DIV R2, R0
+    deposit(001000, prog, 1);
+    uint64_t before = cpu->time_ns;
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_UINT64(7050u, cpu->time_ns - before);
+}
+
+static void test_div_by_zero_takes_only_900ns(void) {
+    cpu->r[PDP11_R0] = 0;
+    cpu->r[PDP11_R1] = 100;
+    cpu->r[PDP11_R2] = 0; // divisor 0 -> by-zero quick exit
+    const uint16_t prog[] = {0071002u}; // DIV R2, R0
+    deposit(001000, prog, 1);
+    uint64_t before = cpu->time_ns;
+    pdp11_cpu_step(cpu);
+    TEST_ASSERT_EQUAL_UINT64(900u, cpu->time_ns - before);
+}
+
 static void test_model_psw_masks_match_the_reference_table(void) {
     TEST_ASSERT_EQUAL_HEX16(0000377u, pdp11_model_lookup(PDP11_MODEL_1120)->psw_mask);
     TEST_ASSERT_EQUAL_HEX16(0170377u, pdp11_model_lookup(PDP11_MODEL_1134)->psw_mask);
@@ -1570,5 +1604,8 @@ int main(void) {
     RUN_TEST(test_mmr1_records_an_autodecrement_as_a_negative_delta);
     RUN_TEST(test_the_mmu_status_registers_do_not_track_on_a_no_mmu_model);
     RUN_TEST(test_mmr1_and_mmr2_freeze_with_mmr0);
+    RUN_TEST(test_ash_adds_150ns_of_execution_time_per_shift);
+    RUN_TEST(test_div_of_a_real_operand_takes_7050ns);
+    RUN_TEST(test_div_by_zero_takes_only_900ns);
     return UNITY_END();
 }

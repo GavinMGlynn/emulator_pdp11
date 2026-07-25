@@ -155,12 +155,13 @@ pdp11_timing pdp11_instr_timing(uint16_t word) {
         return t;
     }
 
-    // EIS / XOR (top nibble 7). MUL and XOR are exact; DIV and ASH/ASHC are
-    // operand/shift-count dependent (P4b tail — the handbook gives only a range
-    // for DIV), so a representative time is used and noted.
+    // EIS / XOR (top nibble 7), Handbook App. C.1.7 (PDF p. 272). All are
+    // "use with SRC times" + an EF time, 1 read cycle. The base EF is returned
+    // here; the data-dependent part (ASH/ASHC +0.15 us per shift, NOTE (I); DIV's
+    // shortest-vs-by-zero span) is added at execution via cpu->eis_extra_ns.
     if (top == 007) {
         int op = (word >> 9) & 07; // IR<11:9>
-        if (op == 0) { // MUL: SRC time + 3.30 us
+        if (op == 0) { // MUL: SRC + 3.30 us
             pdp11_timing t = {addr_ns[dmode] + 3300, addr_cyc[dmode] + 1};
             return t;
         }
@@ -169,8 +170,13 @@ pdp11_timing pdp11_instr_timing(uint16_t word) {
                               addr_cyc[dmode] + 1};
             return t;
         }
-        // DIV (1), ASH (2), ASHC (3): representative, refined at P4b tail.
-        pdp11_timing t = {addr_ns[dmode] + 3300, addr_cyc[dmode] + 1};
+        if (op == 1) { // DIV: SRC + .90 EF minimum (by-zero); +6.15 us normal
+            pdp11_timing t = {addr_ns[dmode] + 900, addr_cyc[dmode] + 1};
+            return t;
+        }
+        // ASH (2): SRC + .75 EF; ASHC (3): SRC + .90 EF; each +0.15 us per shift.
+        uint32_t ef = (op == 2) ? 750u : 900u;
+        pdp11_timing t = {addr_ns[dmode] + ef, addr_cyc[dmode] + 1};
         return t;
     }
 

@@ -83,8 +83,23 @@ static void test_xor_reg_reg_is_300ns(void) {
     TEST_ASSERT_EQUAL_UINT32(300, pdp11_instr_timing(0074001u).ns); // XOR R0,R1
 }
 
+// EIS base EF times (Handbook App. C.1.7): ASH .75 us, ASHC .90 us, DIV .90 us
+// (the by-zero minimum); the per-shift / per-operand parts are added at execution.
+static void test_ash_register_base_is_750ns(void) {
+    TEST_ASSERT_EQUAL_UINT32(750, pdp11_instr_timing(0072002u).ns); // ASH R2,R0
+}
+static void test_ashc_register_base_is_900ns(void) {
+    TEST_ASSERT_EQUAL_UINT32(900, pdp11_instr_timing(0073002u).ns); // ASHC R2,R0
+}
+static void test_div_register_base_is_900ns(void) {
+    TEST_ASSERT_EQUAL_UINT32(900, pdp11_instr_timing(0071002u).ns); // DIV R2,R0
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_ash_register_base_is_750ns);
+    RUN_TEST(test_ashc_register_base_is_900ns);
+    RUN_TEST(test_div_register_base_is_900ns);
     RUN_TEST(test_add_reg_reg_is_300ns);
     RUN_TEST(test_clr_pc_gets_the_r7_penalty_900ns);
     RUN_TEST(test_jmp_deferred_is_900ns);
